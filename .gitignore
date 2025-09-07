@@ -1,0 +1,5 @@
+# Outputs directory (at project root)
+../outputs/
+
+# Python
+__pycache__/
