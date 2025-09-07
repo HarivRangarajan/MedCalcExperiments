@@ -3,3 +3,37 @@
 
 # Python
 __pycache__/
+
+# Virtual environment
+medcalc-env/
+venv/
+env/
+
+# Local configuration files
+config.py
+.env
+
+# API Keys and secrets
+*.key
+*.pem
+.secrets/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/

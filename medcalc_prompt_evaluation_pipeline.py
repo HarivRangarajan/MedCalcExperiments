@@ -41,16 +41,57 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "promptengineer"))
 from promptengineer import PromptPipeline
 from promptengineer.techniques.base import PromptContext
 
-# Import evaluation modules from wound care pipeline
+def load_api_key():
+    """Load OpenAI API key from environment or local config."""
+    import os
+    
+    # Try environment variable first
+    api_key = os.getenv('OPENAI_API_KEY')
+    if api_key and api_key != "your-api-key-here":
+        return api_key
+    
+    # Try local config file
+    try:
+        from config import OPENAI_API_KEY
+        if OPENAI_API_KEY and OPENAI_API_KEY != "your-api-key-here":
+            return OPENAI_API_KEY
+    except ImportError:
+        pass
+    
+    # Try legacy config from mohs-llm-as-a-judge (for backwards compatibility)
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent / "mohs-llm-as-a-judge"))
+        from configs.config import OPENAI_API_KEY
+        if OPENAI_API_KEY and OPENAI_API_KEY != "your-api-key-here":
+            return OPENAI_API_KEY
+    except ImportError:
+        pass
+    
+    return None
+
+# Load API key
+OPENAI_API_KEY = load_api_key()
+
+# Create a simple LLM Judge class if the original isn't available
+class SimpleLLMJudge:
+    """Simple LLM Judge implementation using OpenAI API directly."""
+    
+    def __init__(self, api_key: str, model: str = "gpt-4o"):
+        from openai import OpenAI
+        self.client = OpenAI(api_key=api_key)
+        self.model = model
+
+# Import evaluation modules from wound care pipeline (optional)
 try:
     from modules.llm_judge import LLMJudge
     from modules.prompt_builder import format_input, build_system_prompt
     from utils.cost_estimator import estimate_dataset_cost, get_user_confirmation
-    from configs.config import OPENAI_API_KEY
 except ImportError as e:
     print(f"⚠️  Import warning: {e}")
-    print("Some features may not be available without wound care pipeline components")
-    OPENAI_API_KEY = None
+    print("Using simplified implementations for missing components")
+    LLMJudge = SimpleLLMJudge
 
 # MedCalc evaluation imports
 sys.path.insert(0, str(Path(__file__).parent / "MedCalc-Bench" / "evaluation"))

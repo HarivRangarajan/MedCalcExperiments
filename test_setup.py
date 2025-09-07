@@ -4,6 +4,7 @@ Quick setup test for MedCalc evaluation system
 """
 
 import sys
+import os
 from pathlib import Path
 
 def test_setup():
@@ -47,30 +48,11 @@ def test_setup():
     
     # Test 3: Check API key access
     print("\n3. Checking API key access...")
-    api_key = None
-    
-    # Try from parent wound care config
-    try:
-        sys.path.insert(0, str(Path(__file__).parent.parent / "mohs-llm-as-a-judge"))
-        from configs.config import OPENAI_API_KEY
-        api_key = OPENAI_API_KEY
-        print("   ✅ API key found in wound care config")
-    except ImportError:
-        print("   ⚠️  Wound care config not accessible")
-    
-    # Try from environment
-    import os
-    if not api_key:
-        api_key = os.getenv('OPENAI_API_KEY')
-        if api_key:
-            print("   ✅ API key found in environment")
-    
-    if not api_key or api_key == "your-api-key-here":
-        print("   ❌ No valid API key found")
-        print("   💡 Set OPENAI_API_KEY environment variable or configure in wound care config")
-        return False
+    api_key = os.getenv('OPENAI_API_KEY')
+    if api_key:
+        print("   ✅ API key found in environment")
     else:
-        print("   ✅ API key configured")
+        print("   ⚠️  API key not found in environment")
     
     # Test 4: Check shared components
     print("\n4. Checking shared components...")

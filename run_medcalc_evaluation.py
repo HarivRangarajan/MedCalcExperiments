@@ -25,26 +25,12 @@ def main():
         print("   Please run this script from the medcalc-evaluation directory")
         return
     
-    # Try to get API key from environment or config
-    api_key = None
+    # Try to get API key from environment
+    api_key = os.getenv('OPENAI_API_KEY')
     
-    # Try from parent wound care config
-    try:
-        sys.path.insert(0, str(Path(__file__).parent.parent / "mohs-llm-as-a-judge"))
-        from configs.config import OPENAI_API_KEY
-        api_key = OPENAI_API_KEY
-    except ImportError:
-        pass
-    
-    # Try from environment
     if not api_key:
-        api_key = os.getenv('OPENAI_API_KEY')
-    
-    if not api_key or api_key == "your-api-key-here":
         print("❌ OpenAI API key not found!")
-        print("   Please either:")
-        print("   1. Set OPENAI_API_KEY environment variable")
-        print("   2. Configure it in mohs-llm-as-a-judge/configs/config.py")
+        print("   Please set the OPENAI_API_KEY environment variable")
         return
     
     print("✅ API key found")
@@ -54,7 +40,7 @@ def main():
     MAX_RESPONSES_PER_TECHNIQUE = 5  # To manage costs during testing
     BUDGET_LIMIT = 10.0  # Maximum cost in USD
     
-    print(f"\n⚙️  Configuration:")
+    print(f"\n  Configuration:")
     print(f"   • Sample size: {SAMPLE_SIZE} examples")
     print(f"   • Max responses per technique: {MAX_RESPONSES_PER_TECHNIQUE}")
     print(f"   • Budget limit: ${BUDGET_LIMIT}")
