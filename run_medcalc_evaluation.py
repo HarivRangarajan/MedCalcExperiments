@@ -36,27 +36,28 @@ def main():
     print("✅ API key found")
     
     # Configure within budget limits
-    SAMPLE_SIZE = 20  # Adjust as needed
-    MAX_RESPONSES_PER_TECHNIQUE = 5  # To manage costs during testing
+    SAMPLE_SIZE = 2  # Adjust as needed
+    MAX_RESPONSES_PER_TECHNIQUE = 2  # To manage costs during testing
     BUDGET_LIMIT = 10.0  # Maximum cost in USD
     
-    print(f"\n  Configuration:")
+    print(f"\n Configuration:")
     print(f"   • Sample size: {SAMPLE_SIZE} examples")
     print(f"   • Max responses per technique: {MAX_RESPONSES_PER_TECHNIQUE}")
     print(f"   • Budget limit: ${BUDGET_LIMIT}")
     print(f"   • LLM-as-a-judge: Enabled (limited sample for cost control)")
     
-    # Initialize pipeline
-    pipeline = MedCalcEvaluationPipeline(api_key=api_key)
+    # Initialize pipeline with configuration
+    pipeline = MedCalcEvaluationPipeline(
+        api_key=api_key,
+        sample_size=SAMPLE_SIZE,
+        max_responses=MAX_RESPONSES_PER_TECHNIQUE,
+        budget_limit=BUDGET_LIMIT
+    )
     
     print(f"\n🚀 Starting evaluation...")
     
     try:
-        results = pipeline.run_complete_evaluation(
-            sample_size=SAMPLE_SIZE,
-            max_responses=MAX_RESPONSES_PER_TECHNIQUE,
-            budget_limit=BUDGET_LIMIT
-        )
+        results = pipeline.run_complete_evaluation()
         
         print(f"\n🎉 Evaluation completed successfully!")
         print(f"\n Quick Results Summary:")

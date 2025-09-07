@@ -74,24 +74,13 @@ def load_api_key():
 # Load API key
 OPENAI_API_KEY = load_api_key()
 
-# Create a simple LLM Judge class if the original isn't available
-class SimpleLLMJudge:
-    """Simple LLM Judge implementation using OpenAI API directly."""
-    
-    def __init__(self, api_key: str, model: str = "gpt-4o"):
-        from openai import OpenAI
-        self.client = OpenAI(api_key=api_key)
-        self.model = model
-
-# Import evaluation modules from wound care pipeline (optional)
+# Import our custom LLM Judge
 try:
-    from modules.llm_judge import LLMJudge
-    from modules.prompt_builder import format_input, build_system_prompt
-    from utils.cost_estimator import estimate_dataset_cost, get_user_confirmation
+    from modules.custom_llm_judge import CustomLLMJudge as LLMJudge
 except ImportError as e:
     print(f"⚠️  Import warning: {e}")
-    print("Using simplified implementations for missing components")
-    LLMJudge = SimpleLLMJudge
+    print("Custom LLM Judge not available - skipping LLM-as-a-judge evaluation")
+    LLMJudge = None
 
 # MedCalc evaluation imports
 sys.path.insert(0, str(Path(__file__).parent / "MedCalc-Bench" / "evaluation"))
@@ -105,9 +94,29 @@ except ImportError as e:
 class MedCalcEvaluationPipeline:
     """Complete evaluation pipeline for MedCalc-Bench with prompt engineering comparison."""
     
-    def __init__(self, api_key: str, output_dir: str = None):
+    # Configuration constants
+    DEFAULT_LLM_JUDGE_SAMPLE_SIZE = 20  # Maximum responses to evaluate per technique with LLM judge
+    DEFAULT_RESPONSE_GENERATION_MAX = 5  # Maximum responses to generate per technique
+    DEFAULT_SAMPLE_SIZE = 20  # Default number of examples to sample from dataset
+    DEFAULT_BUDGET_LIMIT = 10.0  # Default budget limit in USD
+    DEFAULT_MODEL = "gpt-4o"  # Default model for evaluations
+    
+    def __init__(self, api_key: str, output_dir: str = None, 
+                 sample_size: int = None,
+                 max_responses: int = None,
+                 llm_judge_sample_size: int = None,
+                 budget_limit: float = None,
+                 model: str = None):
         """Initialize the evaluation pipeline."""
         self.api_key = api_key
+        
+        # Set configuration parameters with defaults
+        self.sample_size = sample_size if sample_size is not None else self.DEFAULT_SAMPLE_SIZE
+        self.max_responses = max_responses if max_responses is not None else self.DEFAULT_RESPONSE_GENERATION_MAX
+        self.llm_judge_sample_size = llm_judge_sample_size if llm_judge_sample_size is not None else self.DEFAULT_LLM_JUDGE_SAMPLE_SIZE
+        self.budget_limit = budget_limit if budget_limit is not None else self.DEFAULT_BUDGET_LIMIT
+        self.model = model if model is not None else self.DEFAULT_MODEL
+        
         if output_dir is None:
             # Create output directory in centralized outputs folder (relative to project root)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -123,11 +132,15 @@ class MedCalcEvaluationPipeline:
         # Initialize components
         self.prompt_pipeline = PromptPipeline(api_key=api_key, output_dir=str(self.output_dir))
         
-        if OPENAI_API_KEY:
+        if OPENAI_API_KEY and LLMJudge:
             self.llm_judge = LLMJudge(api_key=api_key, model="gpt-4o")
         else:
             self.llm_judge = None
-            print("⚠️  LLM Judge not available - skipping LLM-as-a-judge evaluation")
+            if not OPENAI_API_KEY:
+                print("⚠️  LLM Judge not available - no API key configured")
+            elif not LLMJudge:
+                print("⚠️  LLM Judge not available - LLMJudge class not found")
+            print("   Skipping LLM-as-a-judge evaluation")
         
         # MedCalc-specific components
         self.medcalc_evaluator = GPTInference() if 'GPTInference' in globals() else None
@@ -153,8 +166,11 @@ class MedCalcEvaluationPipeline:
             print(f"⚠️  Error loading one-shot examples: {e}")
             return {}
     
-    def load_medcalc_data(self, sample_size: int = 300) -> pd.DataFrame:
+    def load_medcalc_data(self, sample_size: int = None) -> pd.DataFrame:
         """Load and sample MedCalc-Bench test data."""
+        if sample_size is None:
+            sample_size = self.sample_size
+        
         print(f"\n📋 STEP 1: Loading MedCalc-Bench Data (Sample: {sample_size})")
         print("="*60)
         
@@ -357,28 +373,8 @@ Let's think step by step:"""
             return prompt
         
         else:
-            # Fallback to generic example if no specific example found
-            return f"""Given the patient note and question below, think step by step and provide the final numerical answer.
-
-Here's an example of how to approach this:
-
-Example Patient Note: A 45-year-old male patient, height 175 cm, weight 80 kg, with serum creatinine of 1.2 mg/dL.
-
-Example Question: What is the patient's Creatinine Clearance using the Cockcroft-Gault Equation?
-
-Example Answer: Let me calculate step by step:
-1. First, I'll identify the relevant values: Age = 45 years, Weight = 80 kg, Sex = Male, Creatinine = 1.2 mg/dL
-2. The Cockcroft-Gault formula is: CrCl = ((140 - age) × weight × gender_coefficient) / (creatinine × 72)
-3. For males, gender_coefficient = 1
-4. Calculating: CrCl = ((140 - 45) × 80 × 1) / (1.2 × 72) = (95 × 80) / 86.4 = 7600 / 86.4 = 87.96 mL/min
-
-Now solve this problem:
-
-Patient Note: {patient_note}
-
-Question: {question}
-
-Let's think step by step:"""
+            # No calculator-specific example found
+            raise ValueError(f"No calculator-specific example found for calculator ID: {calculator_id}")
     
     def get_enhanced_calculator_specific_prompt(self, technique: str, calculator_id: str, patient_note: str, question: str) -> str:
         """Generate calculator-specific enhanced one-shot prompt using PromptEngineer techniques."""
@@ -436,6 +432,9 @@ Please provide your step-by-step reasoning:"""
                           original_prompts: Dict[str, str],
                           max_examples: int = None) -> Dict[str, List[Dict[str, Any]]]:
         """Generate responses using both original and enhanced prompts."""
+        if max_examples is None:
+            max_examples = self.max_responses
+        
         print("\n💬 STEP 4: Generating Responses")
         print("="*60)
         
@@ -714,67 +713,13 @@ Please provide your answer:"""
         return abs((predicted - ground_truth) / ground_truth) < tolerance
     
     def evaluate_with_llm_judge(self, responses: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
-        """Evaluate response quality using LLM-as-a-judge."""
+        """Evaluate response quality using our Custom LLM-as-a-judge."""
         if not self.llm_judge:
             print("\n⚠️  Skipping LLM-as-a-judge evaluation (not available)")
             return {}
         
-        print("\n⚖️ STEP 6: LLM-as-a-Judge Evaluation")
+        print("\n⚖️ STEP 6: Custom LLM-as-a-Judge Evaluation")
         print("="*60)
-        
-        # System prompt for medical calculation evaluation
-        judge_system_prompt = """You are an expert medical professional evaluating AI responses to medical calculation questions.
-
-Evaluate each response on the following criteria:
-1. Accuracy: Is the final numerical answer correct?
-2. Methodology: Is the calculation approach correct?
-3. Reasoning: Is the step-by-step reasoning clear and logical?
-4. Value Extraction: Are the correct values extracted from the patient note?
-5. Clinical Appropriateness: Is the response clinically sound?
-
-Rate the response as:
-PASS = 1: The response is accurate, well-reasoned, and clinically appropriate
-FAIL = 0: The response has errors in calculation, reasoning, or clinical appropriateness
-
-Provide your evaluation in this format:
-PASS/FAIL: [1 or 0]
-ACCURACY: [correct/incorrect]
-METHODOLOGY: [correct/incorrect] 
-REASONING: [clear/unclear]
-CLINICAL: [appropriate/inappropriate]
-REASON: [brief explanation of decision]"""
-        
-        # Save the judge system prompt and metadata
-        judge_prompt_file = self.output_dir / "judge_prompts" / "llm_judge_system_prompt.txt"
-        with open(judge_prompt_file, 'w') as f:
-            f.write(judge_system_prompt)
-        
-        # Save judge metadata including input format
-        judge_metadata = {
-            "system_prompt": judge_system_prompt,
-            "model": "gpt-4o",
-            "temperature": 0.2,
-            "evaluation_criteria": [
-                "Accuracy: Is the final numerical answer correct?",
-                "Methodology: Is the calculation approach correct?",
-                "Reasoning: Is the step-by-step reasoning clear and logical?",
-                "Value Extraction: Are the correct values extracted from the patient note?",
-                "Clinical Appropriateness: Is the response clinically sound?"
-            ],
-            "input_format_example": """
-PATIENT NOTE: {patient_note}
-QUESTION: {question}
-AI RESPONSE: {response}
-GROUND TRUTH ANSWER: {ground_truth_answer}
-GROUND TRUTH EXPLANATION: {ground_truth_explanation}
-""",
-            "output_format": "PASS/FAIL: [1 or 0]\nACCURACY: [correct/incorrect]\nMETHODOLOGY: [correct/incorrect]\nREASONING: [clear/unclear]\nCLINICAL: [appropriate/inappropriate]\nREASON: [brief explanation]",
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        judge_metadata_file = self.output_dir / "judge_prompts" / "judge_metadata.json"
-        with open(judge_metadata_file, 'w') as f:
-            json.dump(judge_metadata, f, indent=2)
         
         judge_results = {}
         sample_interactions = []  # To save examples of judge interactions
@@ -785,46 +730,25 @@ GROUND TRUTH EXPLANATION: {ground_truth_explanation}
             evaluations = []
             
             # Sample for evaluation (to manage costs)
-            sample_size = min(50, len(response_list))  # Evaluate up to 50 per technique
+            sample_size = min(self.llm_judge_sample_size, len(response_list))  # Evaluate up to 50 per technique
             sampled_responses = random.sample(response_list, sample_size)
             
             for i, response_data in enumerate(sampled_responses):
                 try:
-                    # Format evaluation input
-                    eval_input = f"""
-PATIENT NOTE: {response_data['patient_note'][:1000]}...
-
-QUESTION: {response_data['question']}
-
-AI RESPONSE: {response_data['response']}
-
-GROUND TRUTH ANSWER: {response_data['ground_truth_answer']}
-
-GROUND TRUTH EXPLANATION: {response_data['ground_truth_explanation'][:500]}...
-"""
-                    
-                    # Get LLM judge evaluation
-                    eval_response = self.llm_judge.client.chat.completions.create(
-                        model="gpt-4o",
-                        messages=[
-                            {"role": "system", "content": judge_system_prompt},
-                            {"role": "user", "content": eval_input}
-                        ],
-                        temperature=0.2
+                    # Use our custom LLM judge for evaluation
+                    label, reason = self.llm_judge.evaluate_medical_response(
+                        patient_note=response_data['patient_note'],
+                        question=response_data['question'],
+                        ai_response=response_data['response'],
+                        ground_truth_answer=response_data['ground_truth_answer'],
+                        ground_truth_explanation=response_data.get('ground_truth_explanation', '')
                     )
-                    
-                    eval_text = eval_response.choices[0].message.content
-                    eval_result = self._parse_judge_evaluation(eval_text)
                     
                     evaluation_entry = {
                         **response_data,
-                        "llm_judge_label": eval_result.get("label", 0),
-                        "llm_judge_accuracy": eval_result.get("accuracy", "incorrect"),
-                        "llm_judge_methodology": eval_result.get("methodology", "incorrect"),
-                        "llm_judge_reasoning": eval_result.get("reasoning", "unclear"),
-                        "llm_judge_clinical": eval_result.get("clinical", "inappropriate"),
-                        "llm_judge_reason": eval_result.get("reason", ""),
-                        "llm_judge_raw": eval_text
+                        "llm_judge_label": label if label is not None else 0,
+                        "llm_judge_reason": reason if reason is not None else "Evaluation failed",
+                        "timestamp": datetime.now().isoformat()
                     }
                     
                     evaluations.append(evaluation_entry)
@@ -833,9 +757,12 @@ GROUND TRUTH EXPLANATION: {response_data['ground_truth_explanation'][:500]}...
                     if len(sample_interactions) < 5:  # Save first 5 interactions across all techniques
                         sample_interactions.append({
                             "technique": prompt_type,
-                            "input_to_judge": eval_input,
-                            "judge_response": eval_text,
-                            "parsed_result": eval_result,
+                            "patient_note": response_data['patient_note'][:500] + "...",
+                            "question": response_data['question'],
+                            "ai_response": response_data['response'][:500] + "...",
+                            "ground_truth": response_data['ground_truth_answer'],
+                            "judge_label": label,
+                            "judge_reason": reason,
                             "timestamp": datetime.now().isoformat()
                         })
                     
@@ -844,6 +771,14 @@ GROUND TRUTH EXPLANATION: {response_data['ground_truth_explanation'][:500]}...
                     
                 except Exception as e:
                     print(f"      ❌ Judge evaluation error: {str(e)}")
+                    # Add failed evaluation entry
+                    evaluation_entry = {
+                        **response_data,
+                        "llm_judge_label": 0,
+                        "llm_judge_reason": f"Evaluation failed: {str(e)}",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    evaluations.append(evaluation_entry)
                     continue
             
             judge_results[prompt_type] = evaluations
@@ -865,32 +800,6 @@ GROUND TRUTH EXPLANATION: {response_data['ground_truth_explanation'][:500]}...
             print(f"      💾 Saved {len(sample_interactions)} sample judge interactions")
         
         return judge_results
-    
-    def _parse_judge_evaluation(self, eval_text: str) -> Dict[str, Any]:
-        """Parse LLM judge evaluation response."""
-        result = {"label": 0, "accuracy": "incorrect", "methodology": "incorrect", 
-                 "reasoning": "unclear", "clinical": "inappropriate", "reason": ""}
-        
-        lines = eval_text.strip().split('\n')
-        for line in lines:
-            line = line.strip()
-            if line.startswith("PASS/FAIL:"):
-                try:
-                    result["label"] = int(line.split(':')[1].strip())
-                except:
-                    result["label"] = 1 if "PASS" in line.upper() else 0
-            elif line.startswith("ACCURACY:"):
-                result["accuracy"] = line.split(':', 1)[1].strip().lower()
-            elif line.startswith("METHODOLOGY:"):
-                result["methodology"] = line.split(':', 1)[1].strip().lower()
-            elif line.startswith("REASONING:"):
-                result["reasoning"] = line.split(':', 1)[1].strip().lower()
-            elif line.startswith("CLINICAL:"):
-                result["clinical"] = line.split(':', 1)[1].strip().lower()
-            elif line.startswith("REASON:"):
-                result["reason"] = line.split(':', 1)[1].strip()
-        
-        return result
     
     def create_visualizations(self, accuracy_results: Dict[str, Dict[str, float]], 
                             judge_results: Dict[str, Any] = None) -> None:
@@ -1031,42 +940,36 @@ GROUND TRUTH EXPLANATION: {response_data['ground_truth_explanation'][:500]}...
         """Plot LLM-as-a-judge evaluation results."""
         prompt_types = list(judge_results.keys())
         
-        # Calculate judge metrics
-        judge_metrics = {}
+        # Calculate pass rates
+        pass_rates = {}
         for prompt_type, evaluations in judge_results.items():
             if evaluations:
-                judge_metrics[prompt_type] = {
-                    'pass_rate': sum(1 for e in evaluations if e["llm_judge_label"] == 1) / len(evaluations),
-                    'accuracy_correct': sum(1 for e in evaluations if e["llm_judge_accuracy"] == "correct") / len(evaluations),
-                    'methodology_correct': sum(1 for e in evaluations if e["llm_judge_methodology"] == "correct") / len(evaluations),
-                    'reasoning_clear': sum(1 for e in evaluations if e["llm_judge_reasoning"] == "clear") / len(evaluations),
-                    'clinical_appropriate': sum(1 for e in evaluations if e["llm_judge_clinical"] == "appropriate") / len(evaluations)
-                }
+                pass_rate = sum(1 for e in evaluations if e["llm_judge_label"] == 1) / len(evaluations)
+                pass_rates[prompt_type] = pass_rate
         
-        if not judge_metrics:
+        if not pass_rates:
             return
         
-        # Create multi-metric comparison
-        metrics = ['pass_rate', 'accuracy_correct', 'methodology_correct', 'reasoning_clear', 'clinical_appropriate']
-        metric_labels = ['Overall Pass Rate', 'Accuracy', 'Methodology', 'Reasoning', 'Clinical Appropriateness']
+        # Create pass rate comparison chart
+        fig, ax = plt.subplots(figsize=(12, 8))
         
-        fig, ax = plt.subplots(figsize=(14, 8))
+        prompt_names = [self._clean_prompt_name(pt) for pt in prompt_types]
+        rates = [pass_rates[pt] for pt in prompt_types]
         
-        x = np.arange(len(metrics))
-        width = 0.8 / len(prompt_types)
+        bars = ax.bar(prompt_names, rates, alpha=0.8, color='skyblue')
         
-        for i, prompt_type in enumerate(prompt_types):
-            values = [judge_metrics[prompt_type][metric] for metric in metrics]
-            ax.bar(x + i * width, values, width, label=self._clean_prompt_name(prompt_type), alpha=0.8)
+        # Add value labels on bars
+        for bar, rate in zip(bars, rates):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                   f'{rate:.1%}', ha='center', va='bottom', fontweight='bold')
         
-        ax.set_xlabel('Evaluation Criteria', fontsize=12)
-        ax.set_ylabel('Score', fontsize=12)
-        ax.set_title('LLM-as-a-Judge Evaluation Results', fontsize=16, fontweight='bold')
-        ax.set_xticks(x + width * (len(prompt_types) - 1) / 2)
-        ax.set_xticklabels(metric_labels, rotation=45, ha='right')
-        ax.legend()
+        ax.set_xlabel('Prompt Types', fontsize=12)
+        ax.set_ylabel('Pass Rate', fontsize=12)
+        ax.set_title('LLM-as-a-Judge Pass Rates by Prompt Type', fontsize=16, fontweight='bold')
+        ax.set_ylim(0, max(rates) * 1.2 if rates else 1)
         ax.grid(axis='y', alpha=0.3)
         
+        plt.xticks(rotation=45, ha='right')
         plt.tight_layout()
         plt.savefig(self.output_dir / "visualizations" / "llm_judge_results.png", 
                    dpi=300, bbox_inches='tight')
@@ -1258,8 +1161,13 @@ RESULTS SUMMARY
         
         return summary
     
-    def run_complete_evaluation(self, sample_size: int = 300, max_responses: int = None, budget_limit: float = 20.0) -> Dict[str, Any]:
+    def run_complete_evaluation(self, sample_size: int = None, max_responses: int = None, budget_limit: float = None) -> Dict[str, Any]:
         """Run the complete evaluation pipeline."""
+        # Use configured parameters as defaults
+        sample_size = sample_size if sample_size is not None else self.sample_size
+        max_responses = max_responses if max_responses is not None else self.max_responses
+        budget_limit = budget_limit if budget_limit is not None else self.budget_limit
+        
         print("="*100)
         print("MEDCALC-BENCH PROMPT EVALUATION PIPELINE")
         print("="*100)
@@ -1404,24 +1312,32 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python medcalc_prompt_evaluation_pipeline.py --sample-size 300
-  python medcalc_prompt_evaluation_pipeline.py --sample-size 100 --max-responses 50
-  python medcalc_prompt_evaluation_pipeline.py --sample-size 500 --output-dir my_experiment
+  python medcalc_prompt_evaluation_pipeline.py --sample-size 20 --max-responses 5
+  python medcalc_prompt_evaluation_pipeline.py --sample-size 10 --max-responses 3 --budget-limit 5.0
+  python medcalc_prompt_evaluation_pipeline.py --sample-size 50 --llm-judge-sample-size 30 --output-dir my_experiment
         """
     )
     
     parser.add_argument(
         '--sample-size',
         type=int,
-        default=300,
-        help='Number of MedCalc examples to evaluate (default: 300)'
+        default=20,
+        help='Number of MedCalc examples to evaluate (default: 20)'
     )
     
     parser.add_argument(
         '--max-responses',
         type=int,
-        default=None,
-        help='Maximum responses to generate per technique (default: all samples)'
+        default=5,
+        help='Maximum responses to generate per technique (default: 5)'
+    )
+    
+    parser.add_argument(
+        '--llm-judge-sample-size',
+        type=int,
+        default=20,
+        dest='llm_judge_sample_size',  # Use underscores for the attribute name
+        help='Maximum responses to evaluate per technique with LLM judge (default: 20)'
     )
     
     parser.add_argument(
@@ -1440,8 +1356,8 @@ Examples:
     parser.add_argument(
         '--budget-limit',
         type=float,
-        default=20.0,
-        help='Maximum budget in USD (default: $20.00)'
+        default=10.0,
+        help='Maximum budget in USD (default: $10.00)'
     )
     
     return parser.parse_args()
@@ -1461,7 +1377,11 @@ if __name__ == "__main__":
     # Initialize and run pipeline
     pipeline = MedCalcEvaluationPipeline(
         api_key=OPENAI_API_KEY,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        sample_size=args.sample_size,
+        max_responses=args.max_responses,
+        llm_judge_sample_size=args.llm_judge_sample_size,
+        budget_limit=args.budget_limit
     )
     
     # Temporarily disable judge if requested
@@ -1470,11 +1390,7 @@ if __name__ == "__main__":
         print("⚠️  LLM-as-a-judge evaluation disabled per user request")
     
     try:
-        results = pipeline.run_complete_evaluation(
-            sample_size=args.sample_size,
-            max_responses=args.max_responses,
-            budget_limit=args.budget_limit
-        )
+        results = pipeline.run_complete_evaluation()
         print(f"\n🎉 Pipeline completed successfully!")
         print(f"📁 Results saved to: {results['output_directory']}")
         

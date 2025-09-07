@@ -48,9 +48,11 @@ Please read SETUP.md!
 
 ### Quick Start (Recommended)
 
+After completing setup:
+
 ```bash
 # Activate environment
-source ../mohs-llm-as-a-judge/llm-judge-env/bin/activate
+source source medcalc-env/bin/activate
 # Run with default settings (20 samples, 5 responses per technique)
 python run_medcalc_evaluation.py
 ```

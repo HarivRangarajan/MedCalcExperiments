@@ -28,7 +28,7 @@ Clone the PromptEngineer library one level above this directory:
 cd ..
 
 # Clone the PromptEngineer library
-git clone https://github.com/HarivRangarajan/promptengineer
+git clone https://github.com/HarivRangarajan/promptengineer.git
 
 # Return to medcalc-evaluation directory
 cd medcalc-evaluation
