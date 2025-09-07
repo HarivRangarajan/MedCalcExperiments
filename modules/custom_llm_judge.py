@@ -20,6 +20,30 @@ class CustomLLMJudge:
     judgment, specifically tailored for medical calculation tasks.
     """
     
+    # System prompt used for medical calculation evaluation
+    SYSTEM_PROMPT = """You are an expert medical professional evaluating AI responses to medical calculation questions.
+
+Evaluate the AI response based on these criteria:
+1. **Accuracy**: Is the final numerical answer correct?
+2. **Methodology**: Is the calculation approach correct?
+3. **Reasoning**: Is the step-by-step reasoning clear and logical?
+4. **Value Extraction**: Are the correct values extracted from the patient note?
+5. **Clinical Appropriateness**: Is the response clinically sound?
+
+Rate the response as:
+- **PASS (1)**: The response is accurate, well-reasoned, and clinically appropriate
+- **FAIL (0)**: The response has significant errors in calculation, reasoning, or clinical appropriateness
+
+Return your evaluation in JSON format:
+{
+    "label": 1 or 0,
+    "accuracy": "correct" or "incorrect",
+    "methodology": "correct" or "incorrect", 
+    "reasoning": "clear" or "unclear",
+    "clinical": "appropriate" or "inappropriate",
+    "reason": "Brief explanation of your decision"
+}"""
+    
     def __init__(self, api_key: str, model: str = "gpt-4o"):
         """
         Initialize Custom LLM Judge.
@@ -31,6 +55,11 @@ class CustomLLMJudge:
         self.client = OpenAI(api_key=api_key)
         self.model = model
         
+    @property
+    def system_prompt(self) -> str:
+        """Get the system prompt used for evaluation."""
+        return self.SYSTEM_PROMPT
+    
     def safe_json_load(self, response_content: str, top_level_key: str = None) -> Optional[Dict]:
         """
         Safely parse JSON from LLM response.
@@ -128,29 +157,6 @@ class CustomLLMJudge:
             Tuple of (label, reason) where label is 1 for pass, 0 for fail
         """
         # Create evaluation prompt
-        system_prompt = """You are an expert medical professional evaluating AI responses to medical calculation questions.
-
-Evaluate the AI response based on these criteria:
-1. **Accuracy**: Is the final numerical answer correct?
-2. **Methodology**: Is the calculation approach correct?
-3. **Reasoning**: Is the step-by-step reasoning clear and logical?
-4. **Value Extraction**: Are the correct values extracted from the patient note?
-5. **Clinical Appropriateness**: Is the response clinically sound?
-
-Rate the response as:
-- **PASS (1)**: The response is accurate, well-reasoned, and clinically appropriate
-- **FAIL (0)**: The response has significant errors in calculation, reasoning, or clinical appropriateness
-
-Return your evaluation in JSON format:
-{
-    "label": 1 or 0,
-    "accuracy": "correct" or "incorrect",
-    "methodology": "correct" or "incorrect", 
-    "reasoning": "clear" or "unclear",
-    "clinical": "appropriate" or "inappropriate",
-    "reason": "Brief explanation of your decision"
-}"""
-
         user_prompt = f"""
 **Patient Note:** {patient_note}
 
@@ -168,7 +174,7 @@ Please evaluate this AI response and provide your assessment in the specified JS
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": system_prompt},
+                    {"role": "system", "content": self.SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.1,

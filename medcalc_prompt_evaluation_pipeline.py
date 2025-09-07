@@ -34,7 +34,6 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Add parent directories to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "mohs-llm-as-a-judge"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "promptengineer"))
 
 # Import shared components
@@ -48,27 +47,20 @@ def load_api_key():
     # Try environment variable first
     api_key = os.getenv('OPENAI_API_KEY')
     if api_key and api_key != "your-api-key-here":
+        print("✅ API key loaded from environment variable")
         return api_key
     
     # Try local config file
     try:
         from config import OPENAI_API_KEY
         if OPENAI_API_KEY and OPENAI_API_KEY != "your-api-key-here":
+            print("✅ API key loaded from local config.py")
             return OPENAI_API_KEY
     except ImportError:
+        print("⚠️  Local config.py not found")
         pass
     
-    # Try legacy config from mohs-llm-as-a-judge (for backwards compatibility)
-    try:
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).parent.parent / "mohs-llm-as-a-judge"))
-        from configs.config import OPENAI_API_KEY
-        if OPENAI_API_KEY and OPENAI_API_KEY != "your-api-key-here":
-            return OPENAI_API_KEY
-    except ImportError:
-        pass
-    
+    print("❌ No valid API key found")
     return None
 
 # Load API key
@@ -76,10 +68,20 @@ OPENAI_API_KEY = load_api_key()
 
 # Import our custom LLM Judge
 try:
+    # Ensure current directory is in path for local modules
+    import sys
+    from pathlib import Path
+    current_dir = Path(__file__).parent
+    if str(current_dir) not in sys.path:
+        sys.path.insert(0, str(current_dir))
+    
     from modules.custom_llm_judge import CustomLLMJudge as LLMJudge
+    print("✅ Custom LLM Judge imported successfully")
 except ImportError as e:
     print(f"⚠️  Import warning: {e}")
     print("Custom LLM Judge not available - skipping LLM-as-a-judge evaluation")
+    print(f"   Current directory: {Path(__file__).parent}")
+    print(f"   Looking for: {Path(__file__).parent / 'modules' / 'custom_llm_judge.py'}")
     LLMJudge = None
 
 # MedCalc evaluation imports
@@ -133,13 +135,15 @@ class MedCalcEvaluationPipeline:
         self.prompt_pipeline = PromptPipeline(api_key=api_key, output_dir=str(self.output_dir))
         
         if OPENAI_API_KEY and LLMJudge:
-            self.llm_judge = LLMJudge(api_key=api_key, model="gpt-4o")
+            self.llm_judge = LLMJudge(api_key=api_key, model=self.model)
+            print(f"✅ Custom LLM Judge initialized with model: {self.model}")
         else:
             self.llm_judge = None
             if not OPENAI_API_KEY:
                 print("⚠️  LLM Judge not available - no API key configured")
             elif not LLMJudge:
-                print("⚠️  LLM Judge not available - LLMJudge class not found")
+                print("⚠️  LLM Judge not available - CustomLLMJudge class not found")
+                print("   Check that modules/custom_llm_judge.py is working correctly")
             print("   Skipping LLM-as-a-judge evaluation")
         
         # MedCalc-specific components
@@ -714,12 +718,58 @@ Please provide your answer:"""
     
     def evaluate_with_llm_judge(self, responses: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
         """Evaluate response quality using our Custom LLM-as-a-judge."""
+        print(f"\n🔍 DEBUG: LLM Judge available: {self.llm_judge is not None}")
+        
         if not self.llm_judge:
             print("\n⚠️  Skipping LLM-as-a-judge evaluation (not available)")
             return {}
         
         print("\n⚖️ STEP 6: Custom LLM-as-a-Judge Evaluation")
         print("="*60)
+        
+        # Get the actual system prompt from our Custom LLM Judge
+        judge_system_prompt = self.llm_judge.system_prompt
+        
+        # Save the judge system prompt
+        judge_prompt_file = self.output_dir / "judge_prompts" / "llm_judge_system_prompt.txt"
+        with open(judge_prompt_file, 'w') as f:
+            f.write(judge_system_prompt)
+        
+        # Save judge metadata
+        judge_metadata = {
+            "system_prompt": judge_system_prompt,
+            "model": self.model,
+            "temperature": 0.1,  # Our custom judge uses 0.1
+            "evaluation_criteria": [
+                "Accuracy: Is the final numerical answer correct?",
+                "Methodology: Is the calculation approach correct?",
+                "Reasoning: Is the step-by-step reasoning clear and logical?",
+                "Value Extraction: Are the correct values extracted from the patient note?",
+                "Clinical Appropriateness: Is the response clinically sound?"
+            ],
+            "input_format_example": """
+**Patient Note:** {patient_note}
+
+**Question:** {question}
+
+**AI Response:** {ai_response}
+
+**Ground Truth Answer:** {ground_truth_answer}
+
+**Ground Truth Explanation:** {ground_truth_explanation}
+
+Please evaluate this AI response and provide your assessment in the specified JSON format.""",
+            "output_format": "JSON format with label (1/0), accuracy, methodology, reasoning, clinical, and reason fields",
+            "judge_type": "Custom LLM Judge",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        judge_metadata_file = self.output_dir / "judge_prompts" / "judge_metadata.json"
+        with open(judge_metadata_file, 'w') as f:
+            json.dump(judge_metadata, f, indent=2)
+        
+        print(f"💾 Saved judge system prompt to: {judge_prompt_file}")
+        print(f"💾 Saved judge metadata to: {judge_metadata_file}")
         
         judge_results = {}
         sample_interactions = []  # To save examples of judge interactions
@@ -791,13 +841,17 @@ Please provide your answer:"""
         judge_file = self.output_dir / "evaluations" / "llm_judge_results.json"
         with open(judge_file, 'w') as f:
             json.dump(judge_results, f, indent=2)
+        print(f"      💾 Saved judge results to: {judge_file}")
+        print(f"      📊 Judge results summary: {len(judge_results)} prompt types evaluated")
         
         # Save sample judge interactions
         if sample_interactions:
             interactions_file = self.output_dir / "judge_prompts" / "sample_interactions.json"
             with open(interactions_file, 'w') as f:
                 json.dump(sample_interactions, f, indent=2)
-            print(f"      💾 Saved {len(sample_interactions)} sample judge interactions")
+            print(f"      💾 Saved {len(sample_interactions)} sample judge interactions to: {interactions_file}")
+        else:
+            print(f"      ⚠️  No sample interactions to save")
         
         return judge_results
     
@@ -1369,7 +1423,7 @@ if __name__ == "__main__":
     # Check API key
     if not OPENAI_API_KEY or OPENAI_API_KEY == "your-api-key-here":
         print("❌ API key not configured properly")
-        print("   Please set your OpenAI API key in mohs-llm-as-a-judge/configs/config.py")
+        print("   Please set your OpenAI API key environment variable")
         sys.exit(1)
     
     print("✅ API key configured")
