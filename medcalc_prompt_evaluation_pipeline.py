@@ -674,13 +674,21 @@ Please provide your answer:"""
                         
                         # Use the cached final_prompt directly without appending patient note/question
                         cached_final_prompt = demonstration_cache[cache_key]['pipeline_results']['pipeline_summary']['few_shot_prompt']
+
+                        formatted_prompt = f"""{cached_final_prompt}
+
+Patient Note: {row['Patient Note']}
+
+Question: {row['Question']}
+
+Please provide your answer:"""
                         
                         # Generate response for cached demonstration
                         demo_response = client.chat.completions.create(
                             model="gpt-4o",
                             messages=[
                                 {"role": "system", "content": "You are a medical AI assistant specialized in medical calculations."},
-                                {"role": "user", "content": cached_final_prompt}
+                                {"role": "user", "content": formatted_prompt}
                             ],
                             temperature=0.1
                         )
