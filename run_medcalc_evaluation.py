@@ -9,16 +9,34 @@ with sensible defaults and clear output.
 import sys
 import os
 from pathlib import Path
+import argparse
 
 # Add the main script to the path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from medcalc_prompt_evaluation_pipeline import MedCalcEvaluationPipeline
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="MedCalc-Bench Prompt Evaluation Pipeline",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
+    parser.add_argument(
+        '--calculator-id',
+        type=int,
+        default=None,
+        help='Specific calculator ID to evaluate (default: evaluate all calculators)'
+    )
+    
+    return parser.parse_args()
 
 def main():
     print("🏥 MedCalc-Bench Prompt Evaluation Pipeline")
     print("="*60)
     
+    args = parse_arguments()
+
     # Check if we're in the right directory
     if not Path("MedCalc-Bench").exists():
         print("❌ Error: MedCalc-Bench directory not found!")
@@ -34,9 +52,11 @@ def main():
         return
     
     print("✅ API key found")
-    
+    if args.calculator_id:
+        print(f"   • Calculator ID filter: {args.calculator_id}")
+
     # Configure within budget limits
-    SAMPLE_SIZE = 2  # Adjust as needed
+    SAMPLE_SIZE = 1  # Adjust as needed
     MAX_RESPONSES_PER_TECHNIQUE = 2  # To manage costs during testing
     BUDGET_LIMIT = 10.0  # Maximum cost in USD
     
@@ -57,7 +77,7 @@ def main():
     print(f"\n🚀 Starting evaluation...")
     
     try:
-        results = pipeline.run_complete_evaluation()
+        results = pipeline.run_complete_evaluation(calculator_id=args.calculator_id)
         
         print(f"\n🎉 Evaluation completed successfully!")
         print(f"\n Quick Results Summary:")

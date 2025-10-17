@@ -114,7 +114,6 @@ ls MedCalc-Bench/dataset/test_data.csv
 python -c "
 import sys
 sys.path.append('MedCalc-Bench/evaluation')
-from evaluate import evaluate_answer
 from promptengineer import PromptPipeline
 from promptengineer.techniques.base import PromptContext
 print('✅ All imports successful')

@@ -35,10 +35,14 @@ warnings.filterwarnings('ignore')
 
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "promptengineer"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "Demonstration_Co_Create"))
 
 # Import shared components
 from promptengineer import PromptPipeline
 from promptengineer.techniques.base import PromptContext
+
+# Import the demonstration pipeline
+from src.core.pipeline import DemonstrationPipeline
 
 def load_api_key():
     """Load OpenAI API key from environment or local config."""
@@ -133,6 +137,7 @@ class MedCalcEvaluationPipeline:
         
         # Initialize components
         self.prompt_pipeline = PromptPipeline(api_key=api_key, output_dir=str(self.output_dir))
+        self.demo_pipeline = DemonstrationPipeline(api_key=api_key, output_dir=str(self.output_dir))
         
         if OPENAI_API_KEY and LLMJudge:
             self.llm_judge = LLMJudge(api_key=api_key, model=self.model)
@@ -169,6 +174,52 @@ class MedCalcEvaluationPipeline:
         except Exception as e:
             print(f"⚠️  Error loading one-shot examples: {e}")
             return {}
+    
+    def load_medcalc_data_by_calculator(self, calculator_id: int, sample_size: int = None) -> pd.DataFrame:
+        """Load and sample MedCalc-Bench test data for a specific calculator."""
+        if sample_size is None:
+            sample_size = self.sample_size
+        
+        print(f"\n📋 STEP 1: Loading MedCalc-Bench Data for Calculator ID {calculator_id} (Sample: {sample_size})")
+        print("="*60)
+        
+        # Load test data
+        test_data_path = Path(__file__).parent / "MedCalc-Bench" / "dataset" / "test_data.csv"
+        df = pd.read_csv(test_data_path)
+        
+        # Filter by calculator ID
+        filtered_df = df[df['Calculator ID'] == calculator_id]
+        
+        if len(filtered_df) == 0:
+            print(f"❌ No data found for Calculator ID {calculator_id}")
+            return pd.DataFrame()
+        
+        print(f"✅ Found {len(filtered_df)} examples for Calculator ID {calculator_id}")
+        
+        # Get calculator info
+        calculator_name = filtered_df['Calculator Name'].iloc[0]
+        category = filtered_df['Category'].iloc[0]
+        output_type = filtered_df['Output Type'].iloc[0]
+        
+        print(f"   • Calculator: {calculator_name}")
+        print(f"   • Category: {category}")
+        print(f"   • Output Type: {output_type}")
+        
+        # Random sampling
+        if sample_size < len(filtered_df):
+            sampled_df = filtered_df.sample(n=sample_size, random_state=42)
+            print(f"   • Randomly sampled {sample_size} examples")
+        else:
+            sampled_df = filtered_df
+            print(f"   • Using all {len(filtered_df)} examples (requested sample size >= total)")
+        
+        # Save sampled data
+        sample_file = self.output_dir / "data" / f"sampled_calculator_{calculator_id}_data.csv"
+        sampled_df.to_csv(sample_file, index=False)
+        
+        print(f"\n   📊 Sample contains {len(sampled_df)} examples for {calculator_name}")
+        
+        return sampled_df
     
     def load_medcalc_data(self, sample_size: int = None) -> pd.DataFrame:
         """Load and sample MedCalc-Bench test data."""
@@ -521,6 +572,15 @@ Please provide your step-by-step reasoning:"""
             all_responses[f"original_{prompt_type}"] = responses
             print(f"   ✅ Completed: {len(responses)} responses")
         
+        cache_file = Path("demonstrations") / "demonstration_cache.json"
+        demonstration_cache = {}
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'r') as f:
+                    demonstration_cache = json.load(f)
+            except (json.JSONDecodeError, FileNotFoundError):
+                demonstration_cache = {}
+        
         # Process enhanced prompts
         for technique, prompt_data in enhanced_prompts.items():
             print(f"\n   🔄 Generating responses for PromptEngineer {technique}...")
@@ -604,13 +664,64 @@ Please provide your answer:"""
             all_responses[f"enhanced_{technique}"] = responses
             print(f"   ✅ Completed: {len(responses)} responses")
         
-        # Save all responses
+        for technique, prompt_data in enhanced_prompts.items():
+            responses = []
+            for idx, row in df.iterrows():
+                try:
+                    cache_key = f"{technique}_{row['Calculator ID']}"
+                    if cache_key in demonstration_cache:
+                        print(f"   📋 Running cached demonstration for {technique} - {row['Calculator ID']}")
+                        
+                        # Use the cached final_prompt directly without appending patient note/question
+                        cached_final_prompt = demonstration_cache[cache_key]['pipeline_results']['pipeline_summary']['few_shot_prompt']
+                        
+                        # Generate response for cached demonstration
+                        demo_response = client.chat.completions.create(
+                            model="gpt-4o",
+                            messages=[
+                                {"role": "system", "content": "You are a medical AI assistant specialized in medical calculations."},
+                                {"role": "user", "content": cached_final_prompt}
+                            ],
+                            temperature=0.1
+                        )
+                        
+                        demo_response_data = {
+                            "row_number": row['Row Number'],
+                            "calculator_id": row['Calculator ID'],
+                            "calculator_name": row['Calculator Name'],
+                            "category": row['Category'],
+                            "question": row['Question'],
+                            "patient_note": row['Patient Note'],
+                            "ground_truth_answer": row['Ground Truth Answer'],
+                            "ground_truth_explanation": row['Ground Truth Explanation'],
+                            "response": demo_response.choices[0].message.content,
+                            "prompt_type": f"demonstration_{technique}",
+                            "timestamp": datetime.now().isoformat(),
+                            "isDemo": True
+                        }
+                        responses.append(demo_response_data)
+
+                        if (len(responses) % 10) == 0:
+                            print(f"      ✅ Generated {len(responses)} responses")
+                except Exception as e:
+                    print(f"      ❌ Error for row {idx}: {str(e)}")
+                    continue
+
+            all_responses[f"demonstration_{technique}"] = responses
+            print(f"   ✅ Completed: {len(responses)} demonstration responses")
+
+        # Filter out any empty response lists before saving
+        filtered_responses = {k: v for k, v in all_responses.items() if v}
+        
+        # Save only non-empty responses
         responses_file = self.output_dir / "responses" / "all_responses.json"
         with open(responses_file, 'w') as f:
-            json.dump(all_responses, f, indent=2)
+            json.dump(filtered_responses, f, indent=2)
         
-        print(f"\n✅ Total responses generated: {sum(len(r) for r in all_responses.values())}")
-        return all_responses
+        print(f"\n✅ Total responses generated: {sum(len(r) for r in filtered_responses.values())}")
+        print(f"✅ Response types with data: {len(filtered_responses)}")
+        
+        return filtered_responses
     
     def evaluate_accuracy(self, responses: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Dict[str, float]]:
         """Evaluate numerical accuracy using MedCalc built-in metrics."""
@@ -1215,7 +1326,244 @@ RESULTS SUMMARY
         
         return summary
     
-    def run_complete_evaluation(self, sample_size: int = None, max_responses: int = None, budget_limit: float = None) -> Dict[str, Any]:
+    def get_data_for_demonstrations_from_test_data(self, calculator_id):
+        """
+        Fetches data from test_data.csv for a given calculator_id and returns JSON format.
+        
+        Args:
+            calculator_id (int): The Calculator ID to filter by
+            
+        Returns:
+            list: List of dictionaries matching the specified JSON format
+        """
+        csv_path = Path(__file__).parent / "MedCalc-Bench" / "dataset" / "train_data.csv"
+        df = pd.read_csv(csv_path)
+        
+        # Filter by calculator_id
+        filtered_df = df[df['Calculator ID'] == calculator_id]
+        
+        result = []
+        for _, row in filtered_df.iterrows():
+            item = {
+                "id": int(row['Row Number']),
+                "patient_note": row['Patient Note'],
+                "question": row['Question'],
+                "ground_truth_answer": int(row['Ground Truth Answer']) if str(row['Ground Truth Answer']).isdigit() else row['Ground Truth Answer'],
+                "ground_truth_explanation": row['Ground Truth Explanation']
+            }
+            result.append(item)
+        
+        return result
+    
+    def get_enhanced_demonstration_prompt(self, enhanced_prompts, df):
+        """
+        Process enhanced prompts and run demonstration pipeline for one-shot techniques.
+        Uses caching to avoid re-running expensive demonstration generation.
+        
+        Args:
+            enhanced_prompts: Dictionary of enhanced prompts from all_enhanced_prompts.json
+            df: DataFrame containing test data
+            
+        Returns:
+            Dict: Results from demonstration pipeline for each processed prompt technique
+        """
+        # Target techniques for demonstration pipeline
+        target_techniques = ['chain_of_thought_one_shot', 'chain_of_draft_one_shot']
+        
+        print("\n🎭 GENERATING ENHANCED DEMONSTRATIONS")
+        print("="*60)
+        
+        # Initialize cache file
+        cache_file = Path("demonstrations") / "demonstration_cache.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Load existing cache
+        demonstration_cache = self._load_demonstration_cache(cache_file)
+        
+        all_demonstrations = {}
+        cache_updated = False
+        
+        # Process enhanced prompts (outer loop - techniques)
+        for technique, prompt_data in enhanced_prompts.items():
+            # Skip if not a target technique
+            if technique not in target_techniques:
+                print(f"⏭️  Skipping {technique} (not a one-shot technique)")
+                continue
+                
+            print(f"\n🔄 Processing technique: {technique}")
+            print("-"*50)
+            
+            technique_results = []
+            
+            # Process each row in dataframe (inner loop - examples)
+            for idx, row in df.iterrows():
+                calculator_id = str(row['Calculator ID'])
+                calculator_name = row['Calculator Name']
+                
+                try:
+                    print(f"   📊 Calculator ID {calculator_id}: {calculator_name}")
+                    
+                    # Check cache first
+                    cache_key = f"{technique}_{calculator_id}"
+                    if cache_key in demonstration_cache:
+                        print(f"      💾 Loading from cache...")
+                        cached_result = demonstration_cache[cache_key]
+                        
+                        demonstration_data = {
+                            "row_number": row['Row Number'],
+                            "calculator_id": int(calculator_id),
+                            "calculator_name": calculator_name,
+                            "category": row['Category'],
+                            "technique": technique,
+                            "final_prompt": cached_result.get('final_prompt', ''),
+                            "pipeline_results": cached_result.get('pipeline_results', {}),
+                            "source": "cache",
+                            "timestamp": cached_result.get('timestamp', datetime.now().isoformat())
+                        }
+                        
+                        technique_results.append(demonstration_data)
+                        print(f"      ✅ Loaded from cache")
+                        continue
+                    
+                    # Not in cache - need to generate
+                    print(f"      🚀 Generating new demonstrations...")
+                    
+                    # Get examples from test data for this Calculator ID
+                    examples = self.get_data_for_demonstrations_from_test_data(int(calculator_id))
+                    
+                    if not examples:
+                        print(f"      ⚠️  No examples found for Calculator ID {calculator_id}")
+                        continue
+                        
+                    print(f"      📋 Found {len(examples)} examples for demonstrations")
+                    
+                    # Extract the prompt text
+                    initial_prompt = prompt_data.get('prompt', '')
+                    
+                    if not initial_prompt:
+                        print(f"      ⚠️  Warning: No prompt found for {technique}")
+                        continue
+                    
+                    # Run demonstration pipeline
+                    print(f"      ⚙️  Running demonstration pipeline...")
+                    pipeline_results = self.demo_pipeline.run_complete_pipeline_medcalc(
+                        initial_prompt=initial_prompt,
+                        examples=examples,
+                        n_demonstrations=3,
+                        max_iterations=1
+                    )
+                    
+                    # Extract final prompt from pipeline results
+                    final_prompt = pipeline_results.get('final_prompt', '')
+                    if not final_prompt and 'pipeline_summary' in pipeline_results:
+                        final_prompt = pipeline_results['pipeline_summary'].get('final_prompt', '')
+                    
+                    # Store in cache
+                    demonstration_cache[cache_key] = {
+                        'final_prompt': final_prompt,
+                        'pipeline_results': pipeline_results,
+                        'calculator_id': int(calculator_id),
+                        'technique': technique,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    cache_updated = True
+                    
+                    # Create response data
+                    demonstration_data = {
+                        "row_number": row['Row Number'],
+                        "calculator_id": int(calculator_id),
+                        "calculator_name": calculator_name,
+                        "category": row['Category'],
+                        "technique": technique,
+                        "final_prompt": final_prompt,
+                        "pipeline_results": pipeline_results,
+                        "source": "generated",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+                    technique_results.append(demonstration_data)
+                    
+                    best_score = pipeline_results.get('pipeline_summary', {}).get('best_score', 0)
+                    print(f"      ✅ Generated - Best Score: {best_score:.1%}")
+                    
+                    # Save cache periodically
+                    if len(technique_results) % 5 == 0:
+                        print(f"      💾 Saving cache...")
+                        self._save_demonstration_cache(demonstration_cache, cache_file)
+                    
+                except Exception as e:
+                    print(f"      ❌ Error for Calculator ID {calculator_id}: {str(e)}")
+                    
+                    # Store error in results
+                    error_data = {
+                        "row_number": row['Row Number'],
+                        "calculator_id": int(calculator_id),
+                        "calculator_name": calculator_name,
+                        "category": row['Category'],
+                        "technique": technique,
+                        "error": str(e),
+                        "source": "error",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    technique_results.append(error_data)
+                    continue
+            
+            all_demonstrations[f"enhanced_{technique}"] = technique_results
+            print(f"   ✅ Completed {technique}: {len(technique_results)} demonstrations")
+        
+        # Save final cache
+        if cache_updated:
+            print(f"\n💾 Saving demonstration cache...")
+            self._save_demonstration_cache(demonstration_cache, cache_file)
+        
+        # Save all demonstrations
+        # demonstrations_file = self.output_dir / "demonstrations" / "all_demonstrations.json"
+        # with open(demonstrations_file, 'w') as f:
+        #     json.dump(all_demonstrations, f, indent=2)
+        
+        # Print summary
+        total_generated = sum(len(r) for r in all_demonstrations.values())
+        from_cache = sum(1 for technique_results in all_demonstrations.values() 
+                        for result in technique_results if result.get('source') == 'cache')
+        newly_generated = sum(1 for technique_results in all_demonstrations.values() 
+                             for result in technique_results if result.get('source') == 'generated')
+        errors = sum(1 for technique_results in all_demonstrations.values() 
+                    for result in technique_results if result.get('source') == 'error')
+        
+        print(f"\n🎉 DEMONSTRATION GENERATION COMPLETED")
+        print(f"   Total demonstrations: {total_generated}")
+        print(f"   From cache: {from_cache}")
+        print(f"   Newly generated: {newly_generated}")
+        print(f"   Errors: {errors}")
+        
+        return all_demonstrations
+    
+    def _load_demonstration_cache(self, cache_file: Path) -> Dict[str, Any]:
+        """Load demonstration cache from file."""
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'r') as f:
+                    cache = json.load(f)
+                print(f"   📂 Loaded cache with {len(cache)} entries")
+                return cache
+            except Exception as e:
+                print(f"   ⚠️  Could not load cache: {e}")
+                return {}
+        else:
+            print(f"   📂 No existing cache found, creating new cache")
+            return {}
+    
+    def _save_demonstration_cache(self, cache: Dict[str, Any], cache_file: Path) -> None:
+        """Save demonstration cache to file."""
+        try:
+            with open(cache_file, 'w') as f:
+                json.dump(cache, f, indent=2)
+            print(f"   💾 Cache saved with {len(cache)} entries")
+        except Exception as e:
+            print(f"   ❌ Could not save cache: {e}")
+
+    
+    def run_complete_evaluation(self, sample_size: int = None, max_responses: int = None, budget_limit: float = None, calculator_id: int = None) -> Dict[str, Any]:
         """Run the complete evaluation pipeline."""
         # Use configured parameters as defaults
         sample_size = sample_size if sample_size is not None else self.sample_size
@@ -1268,7 +1616,13 @@ RESULTS SUMMARY
             print(f"📊 Adjusted estimate: {total_estimated_calls:,} calls, ${estimated_cost:.2f} cost")
         
         # Step 1: Load data
-        df = self.load_medcalc_data(sample_size)
+        if calculator_id is not None:
+            df = self.load_medcalc_data_by_calculator(calculator_id, sample_size)
+            if df.empty:
+                print(f"❌ No data found for Calculator ID {calculator_id}. Exiting.")
+                return {"error": f"No data found for Calculator ID {calculator_id}"}
+        else:
+            df = self.load_medcalc_data(sample_size)
         
         # Step 2: Generate PromptEngineer prompts (both zero-shot and one-shot enhanced)
         print("\n🚀 STEP 2: Generating PromptEngineer Prompts")
@@ -1307,6 +1661,9 @@ RESULTS SUMMARY
         print(f"\n✅ Generated {len(enhanced_prompts)} total enhanced prompts:")
         print(f"   • Zero-shot enhanced: {len(enhanced_prompts_zero_shot)} prompts")
         print(f"   • One-shot enhanced: {len(enhanced_prompts_one_shot)} prompts")
+
+        demonstration_results = self.get_enhanced_demonstration_prompt(enhanced_prompts, df)
+        print(f"   • One-shot demonstrations generated and cached")
         
         # Step 3: Get original prompts
         original_prompts = self.get_original_medcalc_prompts()
@@ -1321,7 +1678,7 @@ RESULTS SUMMARY
         judge_results = self.evaluate_with_llm_judge(responses)
         
         # Step 7: Create visualizations
-        self.create_visualizations(accuracy_results, judge_results)
+        # self.create_visualizations(accuracy_results, judge_results)
         
         # Step 8: Generate report
         self.generate_report(accuracy_results, judge_results)
