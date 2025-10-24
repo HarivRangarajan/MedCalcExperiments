@@ -31,7 +31,8 @@ class PromptRefinementPipeline:
                  results_dir: str,
                  batch_size: int = 17,
                  max_iterations: int = None,
-                 output_dir: str = None):
+                 output_dir: str = None,
+                 num_candidates: int = 5):
         """
         Initialize the refinement pipeline.
         
@@ -41,12 +42,14 @@ class PromptRefinementPipeline:
             batch_size: Number of examples per refinement batch
             max_iterations: Maximum number of iterations (None = use all examples)
             output_dir: Output directory for refined prompts
+            num_candidates: Number of candidate prompts to create (default: 5)
         """
         self.api_key = api_key
         self.client = OpenAI(api_key=api_key)
         self.results_dir = Path(results_dir)
         self.batch_size = batch_size
         self.max_iterations = max_iterations
+        self.num_candidates = num_candidates
         
         if output_dir is None:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -64,6 +67,7 @@ class PromptRefinementPipeline:
         print(f"   • Output dir: {self.output_dir}")
         print(f"   • Batch size: {self.batch_size}")
         print(f"   • Max iterations: {self.max_iterations or 'unlimited'}")
+        print(f"   • Number of candidates: {self.num_candidates}")
     
     def load_results(self, prompt_type: str) -> Tuple[List[Dict], List[Dict]]:
         """Load correct and incorrect responses for a prompt type."""
@@ -292,6 +296,129 @@ Provide ONLY the refined prompt text. Do not include explanations or meta-commen
         
         return refinement_history
     
+    def create_candidate_prompts(self, 
+                                refined_prompts: Dict[str, str],
+                                num_candidates: int = 5) -> List[str]:
+        """
+        Create multiple candidate prompts from refined prompts, each with different angles.
+        
+        Args:
+            refined_prompts: Dict mapping prompt_type to final refined prompt
+            num_candidates: Number of candidate prompts to create
+            
+        Returns:
+            List of candidate prompts
+        """
+        print(f"\n🔗 Creating {num_candidates} candidate prompts from refined prompts")
+        print("="*60)
+        
+        # Define different angles for candidate prompts
+        angles = [
+            {
+                "name": "Balanced Synthesis",
+                "description": "Combines all refinements equally, balancing clarity, thoroughness, and conciseness"
+            },
+            {
+                "name": "Precision-Focused",
+                "description": "Emphasizes mathematical precision, unit conversion accuracy, and careful calculation steps"
+            },
+            {
+                "name": "Context-Aware",
+                "description": "Prioritizes understanding patient context, extracting relevant information, and clinical reasoning"
+            },
+            {
+                "name": "Step-by-Step Methodical",
+                "description": "Focuses on systematic problem-solving with clear, sequential reasoning steps"
+            },
+            {
+                "name": "Error-Prevention",
+                "description": "Emphasizes avoiding common mistakes, double-checking calculations, and validation"
+            }
+        ]
+        
+        candidates = []
+        
+        # Build base context
+        base_context = """You are an expert prompt engineer. You have been given various different refined prompts that were optimized for medical calculation tasks through iterative refinement based on performance feedback.
+
+**Refined Prompts:**
+
+"""
+        
+        for prompt_type, prompt_text in refined_prompts.items():
+            base_context += f"""
+**{prompt_type.replace('_', ' ').title()} Prompt:**
+```
+{prompt_text}
+```
+
+"""
+        
+        # Create each candidate with a different angle
+        for i in range(num_candidates):
+            angle = angles[i % len(angles)]
+            
+            print(f"\n   Creating candidate {i+1}/{num_candidates}: {angle['name']}")
+            
+            instruction = base_context + f"""
+**Your Task:**
+Create a SINGLE UNIFIED PROMPT with a specific focus on: **{angle['name']}**
+
+**Angle Description:** {angle['description']}
+
+The unified prompt should:
+1. Synthesize insights from all three refined prompts above
+2. Apply the specific angle/focus described above while maintaining overall effectiveness
+3. Be clear, coherent, and highly effective for medical calculations
+4. Maintain compatibility with few-shot examples (runtime injection)
+5. Ensure JSON output format with "step_by_step_thinking" and "answer" fields
+6. Work well for different model types (GPT-4o, GPT-4o-mini, GPT-3.5-turbo)
+
+**Output Format:**
+Provide ONLY the unified prompt text. Do not include explanations, meta-commentary, or markdown formatting. Just output the final prompt that can be directly used.
+"""
+            
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": "You are an expert prompt engineer specializing in creating optimized prompts for different use cases."},
+                        {"role": "user", "content": instruction}
+                    ],
+                    temperature=0.7,
+                    max_tokens=4000
+                )
+                
+                candidate_prompt = response.choices[0].message.content.strip()
+                
+                # Remove markdown code blocks if present
+                if candidate_prompt.startswith("```"):
+                    lines = candidate_prompt.split('\n')
+                    candidate_prompt = '\n'.join(lines[1:-1]) if len(lines) > 2 else candidate_prompt
+                
+                candidates.append({
+                    "candidate_id": i + 1,
+                    "angle_name": angle['name'],
+                    "angle_description": angle['description'],
+                    "prompt": candidate_prompt
+                })
+                
+                print(f"      ✓ Created ({len(candidate_prompt)} characters)")
+                
+            except Exception as e:
+                print(f"      ⚠️  Error creating candidate: {e}")
+                # Fallback: use a simple combination
+                fallback = f"[Candidate {i+1} - {angle['name']}]\n\n" + list(refined_prompts.values())[0]
+                candidates.append({
+                    "candidate_id": i + 1,
+                    "angle_name": angle['name'],
+                    "angle_description": angle['description'],
+                    "prompt": fallback
+                })
+        
+        print(f"\n   ✅ Created {len(candidates)} candidate prompts")
+        return candidates
+    
     def combine_refined_prompts(self, 
                                refined_prompts: Dict[str, str]) -> str:
         """
@@ -430,14 +557,28 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
             json.dump(final_refined_prompts, f, indent=2)
         print(f"💾 Saved final refined prompts to: {final_prompts_file}")
         
-        # Combine into unified prompt
-        unified_prompt = self.combine_refined_prompts(final_refined_prompts)
+        # Create candidate prompts
+        candidate_prompts = self.create_candidate_prompts(final_refined_prompts, self.num_candidates)
         
-        # Save unified prompt
+        # Save candidate prompts
+        candidates_file = self.output_dir / "final" / "candidate_prompts.json"
+        with open(candidates_file, 'w') as f:
+            json.dump(candidate_prompts, f, indent=2)
+        print(f"💾 Saved candidate prompts to: {candidates_file}")
+        
+        # Save each candidate as individual file for easy access
+        (self.output_dir / "final" / "candidates").mkdir(exist_ok=True)
+        for candidate in candidate_prompts:
+            cand_file = self.output_dir / "final" / "candidates" / f"candidate_{candidate['candidate_id']}.txt"
+            with open(cand_file, 'w') as f:
+                f.write(candidate['prompt'])
+        
+        # Also create a unified prompt for backward compatibility
+        unified_prompt = self.combine_refined_prompts(final_refined_prompts)
         unified_file = self.output_dir / "final" / "unified_prompt.txt"
         with open(unified_file, 'w') as f:
             f.write(unified_prompt)
-        print(f"💾 Saved unified prompt to: {unified_file}")
+        print(f"💾 Saved unified prompt (backward compatibility) to: {unified_file}")
         
         # Create summary
         summary = {
@@ -446,11 +587,13 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
             "output_dir": str(self.output_dir),
             "batch_size": self.batch_size,
             "max_iterations": self.max_iterations,
+            "num_candidates": self.num_candidates,
             "prompt_types_processed": prompt_types,
             "refinement_iterations": {
                 pt: len(history) for pt, history in all_refinement_history.items()
             },
             "final_prompts_file": str(final_prompts_file),
+            "candidates_file": str(candidates_file),
             "unified_prompt_file": str(unified_file)
         }
         
@@ -466,12 +609,14 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
         for pt in prompt_types:
             iters = len(all_refinement_history.get(pt, []))
             print(f"      - {pt}: {iters} iterations")
-        print(f"   • Unified prompt created: {len(unified_prompt)} characters")
+        print(f"   • Candidate prompts created: {len(candidate_prompts)}")
+        print(f"   • Unified prompt (backward compat): {len(unified_prompt)} characters")
         print(f"\n📁 All outputs saved to: {self.output_dir}/")
         
         return {
             "refinement_history": all_refinement_history,
             "final_refined_prompts": final_refined_prompts,
+            "candidate_prompts": candidate_prompts,
             "unified_prompt": unified_prompt,
             "summary": summary,
             "output_dir": self.output_dir
@@ -513,6 +658,13 @@ def main():
         help='Output directory for refined prompts (default: auto-generated)'
     )
     
+    parser.add_argument(
+        '--num-candidates',
+        type=int,
+        default=5,
+        help='Number of candidate prompts to create (default: 5)'
+    )
+    
     args = parser.parse_args()
     
     # Get API key
@@ -527,7 +679,8 @@ def main():
         results_dir=args.results_dir,
         batch_size=args.batch_size,
         max_iterations=args.max_iterations,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        num_candidates=args.num_candidates
     )
     
     results = pipeline.run_complete_refinement()

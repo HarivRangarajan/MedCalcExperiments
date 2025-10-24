@@ -1,0 +1,19 @@
+{
+  "timestamp": "2025-10-24T11:35:29.413095",
+  "results_dir": "/Users/harivallabharangarajan/Desktop/CMU/PromptResearch/outputs/medcalc_contrastive_edits_evaluation_20251010_054434",
+  "output_dir": "test_pipeline/1_refined_prompts",
+  "batch_size": 17,
+  "max_iterations": 2,
+  "num_candidates": 3,
+  "prompt_types_processed": [
+    "chain_of_thought",
+    "chain_of_draft"
+  ],
+  "refinement_iterations": {
+    "chain_of_thought": 2,
+    "chain_of_draft": 2
+  },
+  "final_prompts_file": "test_pipeline/1_refined_prompts/final/final_refined_prompts.json",
+  "candidates_file": "test_pipeline/1_refined_prompts/final/candidate_prompts.json",
+  "unified_prompt_file": "test_pipeline/1_refined_prompts/final/unified_prompt.txt"
+}

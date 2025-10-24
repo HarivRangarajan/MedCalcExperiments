@@ -1,0 +1,129 @@
+{
+  "timestamp": "2025-10-24T06:45:06.604888",
+  "training_dir": "/Users/harivallabharangarajan/Desktop/CMU/PromptResearch/outputs/medcalc_contrastive_edits_evaluation_20251010_054434",
+  "total_training_examples": 510,
+  "validation_size": 50,
+  "num_correct": 35,
+  "num_incorrect": 15,
+  "correct_ratio": 0.7156862745098039,
+  "incorrect_ratio": 0.28431372549019607,
+  "random_seed": 42,
+  "validation_file": "/Users/harivallabharangarajan/Desktop/CMU/PromptResearch/medcalc-evaluation/optimization_results/run_20251024_064340/2_validation_split/validation_examples.jsonl",
+  "by_calculator": {
+    "Sodium Correction for Hyperglycemia": {
+      "total": 3,
+      "correct": 3,
+      "incorrect": 0
+    },
+    "Body Mass Index (BMI)": {
+      "total": 4,
+      "correct": 3,
+      "incorrect": 1
+    },
+    "Body Surface Area Calculator": {
+      "total": 5,
+      "correct": 4,
+      "incorrect": 1
+    },
+    "Delta Gap": {
+      "total": 2,
+      "correct": 2,
+      "incorrect": 0
+    },
+    "CHA2DS2-VASc Score for Atrial Fibrillation Stroke Risk": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    },
+    "Estimated Due Date": {
+      "total": 2,
+      "correct": 0,
+      "incorrect": 2
+    },
+    "Adjusted Body Weight": {
+      "total": 2,
+      "correct": 2,
+      "incorrect": 0
+    },
+    "Wells' Criteria for Pulmonary Embolism": {
+      "total": 3,
+      "correct": 3,
+      "incorrect": 0
+    },
+    "Mean Arterial Pressure (MAP)": {
+      "total": 4,
+      "correct": 4,
+      "incorrect": 0
+    },
+    "FeverPAIN Score for Strep Pharyngitis": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    },
+    "Centor Score (Modified/McIsaac) for Strep Pharyngitis": {
+      "total": 1,
+      "correct": 0,
+      "incorrect": 1
+    },
+    "Creatinine Clearance (Cockcroft-Gault Equation)": {
+      "total": 2,
+      "correct": 0,
+      "incorrect": 2
+    },
+    "CKD-EPI Equations for Glomerular Filtration Rate": {
+      "total": 2,
+      "correct": 1,
+      "incorrect": 1
+    },
+    "Serum Osmolality": {
+      "total": 1,
+      "correct": 0,
+      "incorrect": 1
+    },
+    "Ideal Body Weight": {
+      "total": 5,
+      "correct": 5,
+      "incorrect": 0
+    },
+    "QTc Bazett Calculator": {
+      "total": 2,
+      "correct": 2,
+      "incorrect": 0
+    },
+    "MDRD GFR Equation": {
+      "total": 2,
+      "correct": 1,
+      "incorrect": 1
+    },
+    "PERC Rule for Pulmonary Embolism": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    },
+    "HEART Score for Major Cardiac Events": {
+      "total": 1,
+      "correct": 0,
+      "incorrect": 1
+    },
+    "Morphine Milligram Equivalents (MME) Calculator": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    },
+    "Free Water Deficit": {
+      "total": 1,
+      "correct": 0,
+      "incorrect": 1
+    },
+    "Maintenance Fluids Calculations": {
+      "total": 3,
+      "correct": 1,
+      "incorrect": 2
+    },
+    "SIRS Criteria": {
+      "total": 1,
+      "correct": 0,
+      "incorrect": 1
+    }
+  }
+}

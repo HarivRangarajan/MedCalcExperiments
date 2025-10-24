@@ -334,8 +334,11 @@ class ContrastiveFewShotEvaluator:
         else:
             match = re.findall(r"(-?\d+(\.\d+)?)", extracted_answer)
             if len(match) > 0:
-                answer = eval(match[-1][0])
-                answer = str(answer)
+                try:
+                    answer = eval(match[-1][0])
+                    answer = str(answer)
+                except:
+                    answer = match[-1][0]
             else:
                 answer = "N/A"
         
@@ -381,14 +384,18 @@ class ContrastiveFewShotEvaluator:
             # Extract answer and explanation
             answer_value, explanation = self.extract_answer(answer, int(calculator_id))
             
-            # Check correctness
-            correctness = check_correctness(
-                answer_value,
-                row["Ground Truth Answer"],
-                calculator_id,
-                row["Upper Limit"],
-                row["Lower Limit"]
-            )
+            # Check correctness (wrap in try-except to handle eval errors in check_correctness)
+            try:
+                correctness = check_correctness(
+                    answer_value,
+                    row["Ground Truth Answer"],
+                    calculator_id,
+                    row["Upper Limit"],
+                    row["Lower Limit"]
+                )
+            except:
+                # If check_correctness fails (e.g., eval error), mark as incorrect
+                correctness = False
             
             status = "Correct" if correctness else "Incorrect"
             

@@ -1,0 +1,94 @@
+{
+  "timestamp": "2025-10-24T11:35:29.634411",
+  "training_dir": "/Users/harivallabharangarajan/Desktop/CMU/PromptResearch/outputs/medcalc_contrastive_edits_evaluation_20251010_054434",
+  "total_training_examples": 510,
+  "validation_size": 20,
+  "num_correct": 14,
+  "num_incorrect": 6,
+  "correct_ratio": 0.7156862745098039,
+  "incorrect_ratio": 0.28431372549019607,
+  "random_seed": 42,
+  "validation_file": "test_pipeline/2_validation_split/validation_examples.jsonl",
+  "by_calculator": {
+    "Free Water Deficit": {
+      "total": 1,
+      "correct": 0,
+      "incorrect": 1
+    },
+    "QTc Bazett Calculator": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    },
+    "Body Mass Index (BMI)": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    },
+    "PERC Rule for Pulmonary Embolism": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    },
+    "MDRD GFR Equation": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    },
+    "SIRS Criteria": {
+      "total": 1,
+      "correct": 0,
+      "incorrect": 1
+    },
+    "Adjusted Body Weight": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    },
+    "Sodium Correction for Hyperglycemia": {
+      "total": 2,
+      "correct": 2,
+      "incorrect": 0
+    },
+    "Ideal Body Weight": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    },
+    "Wells' Criteria for Pulmonary Embolism": {
+      "total": 3,
+      "correct": 1,
+      "incorrect": 2
+    },
+    "Body Surface Area Calculator": {
+      "total": 2,
+      "correct": 1,
+      "incorrect": 1
+    },
+    "Maintenance Fluids Calculations": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    },
+    "Delta Gap": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    },
+    "CKD-EPI Equations for Glomerular Filtration Rate": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    },
+    "CHA2DS2-VASc Score for Atrial Fibrillation Stroke Risk": {
+      "total": 1,
+      "correct": 0,
+      "incorrect": 1
+    },
+    "Mean Arterial Pressure (MAP)": {
+      "total": 1,
+      "correct": 1,
+      "incorrect": 0
+    }
+  }
+}

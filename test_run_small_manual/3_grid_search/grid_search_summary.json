@@ -1,0 +1,73 @@
+{
+  "timestamp": "2025-10-24T11:15:40.532450",
+  "validation_split_dir": "test_run_small_manual/2_validation_split",
+  "refined_prompts_dir": "test_run_small_manual/1_refined_prompts",
+  "num_candidates": 2,
+  "num_models": 3,
+  "models": [
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-3.5-turbo"
+  ],
+  "validation_size": 20,
+  "optimal_config": {
+    "timestamp": "2025-10-24T11:15:40.531793",
+    "optimal_candidate_id": 1,
+    "optimal_candidate_name": "Balanced Synthesis",
+    "optimal_model": "gpt-4o",
+    "validation_accuracy": 0.1,
+    "validation_correct": 2,
+    "validation_total": 20,
+    "all_results": [
+      {
+        "candidate_id": 1,
+        "candidate_name": "Balanced Synthesis",
+        "model": "gpt-4o",
+        "accuracy": 0.1,
+        "correct": 2,
+        "total": 20
+      },
+      {
+        "candidate_id": 1,
+        "candidate_name": "Balanced Synthesis",
+        "model": "gpt-4o-mini",
+        "accuracy": 0.1,
+        "correct": 2,
+        "total": 20
+      },
+      {
+        "candidate_id": 1,
+        "candidate_name": "Balanced Synthesis",
+        "model": "gpt-3.5-turbo",
+        "accuracy": 0.05,
+        "correct": 1,
+        "total": 20
+      },
+      {
+        "candidate_id": 2,
+        "candidate_name": "Precision-Focused",
+        "model": "gpt-4o",
+        "accuracy": 0.1,
+        "correct": 2,
+        "total": 20
+      },
+      {
+        "candidate_id": 2,
+        "candidate_name": "Precision-Focused",
+        "model": "gpt-4o-mini",
+        "accuracy": 0.1,
+        "correct": 2,
+        "total": 20
+      },
+      {
+        "candidate_id": 2,
+        "candidate_name": "Precision-Focused",
+        "model": "gpt-3.5-turbo",
+        "accuracy": 0.05,
+        "correct": 1,
+        "total": 20
+      }
+    ]
+  },
+  "output_dir": "test_run_small_manual/3_grid_search"
+}
