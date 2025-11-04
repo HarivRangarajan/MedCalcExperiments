@@ -8,7 +8,7 @@ This script orchestrates the entire pipeline:
 3. Publication-ready visualizations
 
 Usage:
-    python run_complete_pipeline.py \
+    python runner_refinement_plus_evaluation_plus_visualization.py \
         --training-results-dir outputs/medcalc_contrastive_edits_evaluation_TIMESTAMP \
         --batch-size 17 \
         --skip-refinement  # Optional: skip refinement if already done
@@ -45,7 +45,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Example:
-  python run_complete_pipeline.py \\
+  python runner_refinement_plus_evaluation_plus_visualization.py \\
     --training-results-dir outputs/medcalc_contrastive_edits_evaluation_20251010_054434 \\
     --batch-size 17
         """
@@ -155,9 +155,14 @@ Example:
         
         cmd = [
             sys.executable,
-            'contrastive_few_shot_evaluation.py',
+            'evaluate_contrastive_fewshot_method.py',
             '--refined-prompts-dir', str(refined_prompts_dir),
-            '--training-results-dir', args.training_results_dir
+            '--training-results-dir', args.training_results_dir,
+            '--num-test-examples', '600',
+            '--num-positive', '1',
+            '--num-negative', '1',
+            '--batch-size', '10',
+            '--save-frequency', '50'
         ]
         
         if not run_command(cmd, "Contrastive Few-Shot Evaluation"):

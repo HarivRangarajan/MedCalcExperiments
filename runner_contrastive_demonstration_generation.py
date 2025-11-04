@@ -13,7 +13,7 @@ from pathlib import Path
 # Add the main script to the path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from medcalc_with_contrastive_boosted_edits import MedCalcContrastiveEvaluationPipeline
+from contrastive_demonstration_generation import MedCalcContrastiveEvaluationPipeline
 
 def main():
     print("🏥 MedCalc-Bench with Contrastive Boosted Edits Evaluation")

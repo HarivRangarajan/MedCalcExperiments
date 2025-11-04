@@ -81,7 +81,7 @@ case $choice in
     2)
         echo ""
         echo "🚀 Running quick test with 10 samples..."
-        python run_medcalc_with_contrastive_boosted_edits.py
+        python runner_contrastive_demonstration_generation.py
         ;;
     3)
         echo ""
@@ -89,7 +89,7 @@ case $choice in
         echo "⚠️  This will take 30-45 minutes and cost approximately $15-25"
         read -p "Continue? (y/n): " confirm
         if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-            python medcalc_with_contrastive_boosted_edits.py --sample-size 500
+            python contrastive_demonstration_generation.py --sample-size 500
         else
             echo "Cancelled."
             exit 0
@@ -100,7 +100,7 @@ case $choice in
         read -p "Enter sample size: " sample_size
         echo ""
         echo "🚀 Running with $sample_size samples..."
-        python medcalc_with_contrastive_boosted_edits.py --sample-size "$sample_size"
+        python contrastive_demonstration_generation.py --sample-size "$sample_size"
         ;;
     *)
         echo "Invalid choice"

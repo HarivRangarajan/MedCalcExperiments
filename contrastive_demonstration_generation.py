@@ -3,7 +3,7 @@
 MedCalc-Bench Contrastive Boosted Edits Evaluation Pipeline
 
 Usage:
-  python medcalc_with_contrastive_boosted_edits.py --sample-size 500 --output-dir results_experiment1
+  python contrastive_demonstration_generation.py --sample-size 500 --output-dir results_experiment1
 """
 
 import pandas as pd
@@ -506,8 +506,8 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python medcalc_with_contrastive_boosted_edits.py --sample-size 500
-  python medcalc_with_contrastive_boosted_edits.py --sample-size 100 --output-dir ./my_results
+  python contrastive_demonstration_generation.py --sample-size 500
+  python contrastive_demonstration_generation.py --sample-size 100 --output-dir ./my_results
         """
     )
     

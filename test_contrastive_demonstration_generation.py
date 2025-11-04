@@ -12,7 +12,7 @@ from pathlib import Path
 # Add the main script to the path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from medcalc_with_contrastive_boosted_edits import MedCalcContrastiveEvaluationPipeline
+from contrastive_demonstration_generation import MedCalcContrastiveEvaluationPipeline
 
 def test_pipeline():
     print("🧪 Testing MedCalc Contrastive Edits Pipeline")
@@ -173,7 +173,7 @@ def test_pipeline():
     print("✅ ALL TESTS PASSED!")
     print(f"\nOutput directory: {pipeline.output_dir}")
     print("\nYou can now run the full pipeline with:")
-    print("  python medcalc_with_contrastive_boosted_edits.py --sample-size 500")
+    print("  python contrastive_demonstration_generation.py --sample-size 500")
     
     return True
 

@@ -8,7 +8,7 @@ MedCalc test set. It compares:
 2. Unified refined prompt with contrastive few-shot examples
 
 Usage:
-    python contrastive_few_shot_evaluation.py \
+    python evaluate_contrastive_fewshot_method.py \
         --refined-prompts-dir <path> \
         --training-results-dir <path>
 """

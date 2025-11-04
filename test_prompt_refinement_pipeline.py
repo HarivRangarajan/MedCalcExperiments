@@ -94,7 +94,7 @@ def main():
     print("NEXT STEPS")
     print("="*60)
     print("\nTo run the full pipeline:")
-    print(f"\n  python run_complete_pipeline.py \\")
+    print(f"\n  python runner_refinement_plus_evaluation_plus_visualization.py \\")
     print(f"    --training-results-dir {training_dir} \\")
     print(f"    --batch-size 17")
     print("\nTest outputs saved to: outputs/test_refined_prompts/")

@@ -13,7 +13,7 @@ Evaluation includes:
 - Comprehensive visualizations and statistical analysis
 
 Usage:
-  python medcalc_prompt_evaluation_pipeline.py --sample-size 300 --output-dir results_experiment1
+  python evaluate_baselines.py --sample-size 300 --output-dir results_experiment1
 """
 
 import pandas as pd
@@ -1366,9 +1366,9 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python medcalc_prompt_evaluation_pipeline.py --sample-size 20 --max-responses 5
-  python medcalc_prompt_evaluation_pipeline.py --sample-size 10 --max-responses 3 --budget-limit 5.0
-  python medcalc_prompt_evaluation_pipeline.py --sample-size 50 --llm-judge-sample-size 30 --output-dir my_experiment
+  python evaluate_baselines.py --sample-size 20 --max-responses 5
+  python evaluate_baselines.py --sample-size 10 --max-responses 3 --budget-limit 5.0
+  python evaluate_baselines.py --sample-size 50 --llm-judge-sample-size 30 --output-dir my_experiment
         """
     )
     

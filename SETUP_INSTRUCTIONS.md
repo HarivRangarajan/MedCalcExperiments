@@ -1,21 +1,30 @@
-# Setup Instructions: 
+# Setup Instructions
 
-## Part 1: Generating the contrastive demonstrations
+## Overview: Three-Part Pipeline
 
-In a couple of sentences, this part takes care of the following:
-1. Takes the base prompt used in the MedCalcBench paper
-2. Creates `promptengineer` enhanced flavors of the base prompt (CoT, CoD...)
-3. Takes a subset of the train examples from the MedCalcBench dataset and generates responses for the subset
-4. Evaluates the above responses to create contrastive demonstrations (positve, negative)
+This repository implements a comprehensive prompt engineering evaluation system with three distinct parts:
 
-## What do we need to set up?
+### Part 1: Generating Contrastive Demonstrations
+Creates the foundation by generating positive and negative examples from training data.
 
-1. You need to have the MedCalc-Bench dataset (of course)
-2. Install the `promptengineer` library (this is our custom dependency), and the rest of the library dependencies
-3. Have a Open AI API key
-4. That is pretty much all. Let the experiments begin!
+### Part 2: Prompt Refinement
+Iteratively refines prompts using feedback from contrastive demonstrations.
 
-N.B: I am assuming that your virtual env is at `mohs-llm-as-a-judge/llm-judge-env/bin/activate"`. Check the `setup_and_run.sh` script and modify paths as necessary.
+### Part 3: Evaluations
+Evaluates both baseline methods and our contrastive few-shot approach.
+
+---
+
+## What Do We Need to Set Up?
+
+1. **MedCalc-Bench dataset** - The benchmark dataset for medical calculations
+2. **`promptengineer` library** - Our custom prompt engineering library
+3. **OpenAI API key** - For GPT-4 API access
+4. **Python dependencies** - Installed via virtual environment
+
+**Note**: This guide assumes your virtual environment is at `../mohs-llm-as-a-judge/llm-judge-env/bin/activate`. Check `setup_and_run.sh` and modify paths as necessary.
+
+---
 
 ## Quick Setup (Using Automated Script)
 
@@ -80,49 +89,210 @@ if [ ! -f MedCalc-Bench/dataset/train_data.csv ]; then
 fi
 ```
 
-## Directory Structure Verification
+---
+
+## Directory Structure
 
 Before running, ensure this structure exists:
 
 ```
 PromptResearch/
-├── medcalc-experiements/          ← You are here
+├── medcalc-evaluation/                ← You are here
 │   ├── MedCalc-Bench/
 │   │   ├── dataset/
-│   │   │   ├── train_data.csv   ← Must exist (unzip if needed)
+│   │   │   ├── train_data.csv        ← Must exist (unzip if needed)
 │   │   │   └── test_data.csv
 │   │   └── evaluation/
 │   │       ├── llm_inference.py
 │   │       ├── evaluate.py
 │   │       └── run.py
-│   ├── medcalc_with_contrastive_boosted_edits.py
-│   └── setup_and_run.sh         ← Automated setup script
-├── promptengineer/               ← Must exist
+│   ├── contrastive_demonstration_generation.py
+│   ├── runner_contrastive_demonstration_generation.py
+│   ├── prompt_refinement_pipeline.py
+│   ├── evaluate_contrastive_fewshot_method.py
+│   ├── evaluate_baselines.py
+│   ├── runner_refinement_plus_evaluation_plus_visualization.py
+│   ├── visualize_results.py
+│   └── setup_and_run.sh
+├── promptengineer/                    ← Must exist
 └── mohs-llm-as-a-judge/
-    └── llm-judge-env/            ← Virtual environment
+    └── llm-judge-env/                 ← Virtual environment
         └── bin/
-            └── activate          ← Activation script
+            └── activate
 ```
 
-## Common Setup Issues
+---
 
-### Issue: Virtual Environment Not Found
+## Part 1: Generating Contrastive Demonstrations
+
+**Purpose**: Create positive and negative examples from training data to guide prompt refinement.
+
+**What it does**:
+1. Takes the base prompt from the MedCalc-Bench paper
+2. Creates `promptengineer` enhanced versions (CoT, CoD, etc.)
+3. Generates responses for a subset of train examples
+4. Evaluates responses to identify correct (positive) and incorrect (negative) demonstrations
+
+### Running Part 1
+
+**Quick test (10 samples)**:
+```bash
+python runner_contrastive_demonstration_generation.py
+```
+
+**Full run (500 samples)**:
+```bash
+python contrastive_demonstration_generation.py --sample-size 500
+```
+
+**Output**: Creates `outputs/medcalc_contrastive_edits_evaluation_TIMESTAMP/` with:
+- `correct/` - Positive demonstrations
+- `incorrect/` - Negative demonstrations
+- `prompts/` - Enhanced prompt versions
+
+---
+
+## Part 2: Prompt Refinement
+
+**Purpose**: Iteratively refine prompts using feedback from contrastive demonstrations.
+
+**What it does**:
+1. Loads contrastive demonstrations from Part 1
+2. Uses LLM-as-a-judge to analyze incorrect responses
+3. Generates feedback and refined prompt versions
+4. Selects best examples for few-shot demonstrations
+
+### Running Part 2
+
+**Test refinement pipeline**:
+```bash
+python test_prompt_refinement_pipeline.py
+```
+
+**Full refinement** (requires Part 1 outputs):
+```bash
+python prompt_refinement_pipeline.py \
+  --training-results-dir outputs/medcalc_contrastive_edits_evaluation_TIMESTAMP \
+  --batch-size 17
+```
+
+**Parameters**:
+- `--training-results-dir`: Directory from Part 1
+- `--batch-size`: Number of examples per refinement batch (default: 17)
+- `--max-iterations`: Maximum refinement iterations (default: 3)
+
+**Output**: Creates `outputs/refined_prompts_TIMESTAMP/` with:
+- `refined_prompts/` - Iteratively improved prompts
+- `feedback/` - LLM judge feedback
+- `selected_examples/` - Best contrastive demonstrations
+
+---
+
+## Part 3: Evaluations
+
+**Purpose**: Evaluate both baseline methods and our contrastive few-shot approach on the full test set.
+
+### Part 3A: Evaluating Baselines
+
+Evaluates original MedCalc-Bench prompts and PromptEngineer techniques.
 
 ```bash
-# Check if path exists
-ls ../mohs-llm-as-a-judge/llm-judge-env/bin/activate
-
-# If not found, you may need to create it or adjust the path
+python evaluate_baselines.py --sample-size 300 --output-dir results_baselines
 ```
 
-## Next Steps After Setup
+**What it evaluates**:
+- Original MedCalc prompts (Direct, Zero-shot CoT, One-shot CoT)
+- PromptEngineer generated prompts (Chain of Thought, Chain of Draft)
 
-Once setup is complete:
+### Part 3B: Evaluating Our Method
 
-1. **Test with 2 samples**: `python contrastive_demonstration_generation.py`
-2. **Full run (600 samples)**: `python medcalc_with_contrastive_boosted_edits.py --sample-size 600`
+Evaluates the refined contrastive few-shot prompt on the full test set.
 
-## Summary: Minimal Setup Commands
+```bash
+python evaluate_contrastive_fewshot_method.py \
+  --refined-prompts-dir outputs/test_refined_prompts \
+  --training-results-dir outputs/medcalc_contrastive_edits_evaluation_20251010_054434 \
+  --num-test-examples 600 \
+  --num-positive 1 \
+  --num-negative 1 \
+  --batch-size 10 \
+  --save-frequency 50
+```
+
+**Parameters**:
+- `--refined-prompts-dir`: Directory containing refined prompts from Part 2
+- `--training-results-dir`: Directory containing training results from Part 1
+- `--num-test-examples`: Number of test examples to evaluate (default: 600)
+- `--num-positive`: Number of positive demonstrations to include (default: 1)
+- `--num-negative`: Number of negative demonstrations to include (default: 1)
+- `--batch-size`: Batch size for API calls (default: 10)
+- `--save-frequency`: Save progress every N examples (default: 50)
+
+**What it evaluates**:
+- Original one-shot prompt (baseline)
+- Unified refined prompt with contrastive few-shot examples (our method)
+
+**Output**: Creates `outputs/contrastive_evaluation_TIMESTAMP/` with:
+- `evaluations/evaluation_summary.json` - Accuracy metrics
+- `responses/` - All test responses
+- `analysis/` - Detailed error analysis
+
+### Part 3C: Generate Visualizations
+
+```bash
+python visualize_results.py \
+  --evaluation-dir outputs/contrastive_evaluation_TIMESTAMP
+```
+
+**Generates**:
+- Overall accuracy comparison
+- Category-wise performance
+- Statistical significance tests
+- Error distribution analysis
+
+---
+
+## Running the Complete Pipeline
+
+For Parts 2 + 3 together (assumes Part 1 is complete):
+
+```bash
+python runner_refinement_plus_evaluation_plus_visualization.py \
+  --training-results-dir outputs/medcalc_contrastive_edits_evaluation_TIMESTAMP \
+  --batch-size 17
+```
+
+**This script**:
+1. Runs prompt refinement (Part 2)
+2. Evaluates refined prompts on test set (Part 3B)
+3. Generates publication-ready visualizations (Part 3C)
+
+**Options**:
+- `--skip-refinement`: Skip refinement if already done
+- `--skip-evaluation`: Skip evaluation if already done
+- `--skip-visualization`: Skip visualization if already done
+
+---
+
+## Complete Workflow Summary
+
+### The Three Parts for Our Method:
+
+1. **Generate Contrastive Demonstrations** (Part 1)
+   ```bash
+   python contrastive_demonstration_generation.py --sample-size 500
+   ```
+
+2. **Refine Prompts + Evaluate + Visualize** (Parts 2 & 3)
+   ```bash
+   python runner_refinement_plus_evaluation_plus_visualization.py \
+     --training-results-dir outputs/medcalc_contrastive_edits_evaluation_TIMESTAMP \
+     --batch-size 17
+   ```
+
+These two runner scripts accomplish all three phases of our method.
+
+### Minimal Commands
 
 ```bash
 # 1. Navigate
@@ -138,11 +308,85 @@ export OPENAI_API_KEY="sk-..."
 [ ! -f MedCalc-Bench/dataset/train_data.csv ] && \
   cd MedCalc-Bench/dataset && unzip train_data.csv.zip && cd ../..
 
-# 5. Test
+# 5. Test Part 1
 python test_contrastive_demonstration_generation.py
 
-# 6. Run
-python medcalc_with_contrastive_boosted_edits.py --sample-size 600
+# 6. Run Part 1 (full)
+python contrastive_demonstration_generation.py --sample-size 500
+
+# 7. Run Parts 2 & 3 (full pipeline)
+python runner_refinement_plus_evaluation_plus_visualization.py \
+  --training-results-dir outputs/medcalc_contrastive_edits_evaluation_TIMESTAMP \
+  --batch-size 17
+
+# Or run Part 3B separately with custom parameters
+python evaluate_contrastive_fewshot_method.py \
+  --refined-prompts-dir outputs/test_refined_prompts \
+  --training-results-dir outputs/medcalc_contrastive_edits_evaluation_TIMESTAMP \
+  --num-test-examples 600 \
+  --num-positive 1 \
+  --num-negative 1 \
+  --batch-size 10 \
+  --save-frequency 50
+```
+
+---
+
+## Common Setup Issues
+
+### Issue: Virtual Environment Not Found
+
+```bash
+# Check if path exists
+ls ../mohs-llm-as-a-judge/llm-judge-env/bin/activate
+
+# If not found, you may need to create it or adjust the path
+```
+
+### Issue: MedCalc-Bench Not Found
+
+```bash
+# Clone or copy the MedCalc-Bench repository
+# Ensure train_data.csv is extracted from the zip
+```
+
+### Issue: PromptEngineer Not Found
+
+```bash
+# Check if promptengineer is installed
+python -c "import promptengineer; print('✅ Found')"
+
+# If not, install from the parent directory
+cd ../promptengineer
+pip install -e .
+cd ../medcalc-evaluation
+```
+
+---
+
+## Expected Outputs
+
+After running the complete pipeline:
+
+```
+outputs/
+├── medcalc_contrastive_edits_evaluation_TIMESTAMP/  # Part 1
+│   ├── correct/
+│   ├── incorrect/
+│   └── prompts/
+├── refined_prompts_TIMESTAMP/                        # Part 2
+│   ├── refined_prompts/
+│   ├── feedback/
+│   └── selected_examples/
+└── contrastive_evaluation_TIMESTAMP/                 # Part 3
+    ├── evaluations/
+    │   └── evaluation_summary.json
+    ├── responses/
+    ├── analysis/
+    └── visualizations/                               # Part 3C
+        ├── overall_comparison.png
+        ├── category_comparison.png
+        └── statistical_significance.png
 ```
 
 ---
