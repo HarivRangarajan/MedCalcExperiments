@@ -15,6 +15,8 @@ In a couple of sentences, this part takes care of the following:
 3. Have a Open AI API key
 4. That is pretty much all. Let the experiments begin!
 
+N.B: I am assuming that your virtual env is at `mohs-llm-as-a-judge/llm-judge-env/bin/activate"`. Check the `setup_and_run.sh` script and modify paths as necessary.
+
 ## Quick Setup (Using Automated Script)
 
 The easiest way to get started:
