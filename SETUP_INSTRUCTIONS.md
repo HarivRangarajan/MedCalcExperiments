@@ -119,7 +119,7 @@ ls ../mohs-llm-as-a-judge/llm-judge-env/bin/activate
 
 Once setup is complete:
 
-1. **Test with 2 samples**: `python test_contrastive_edits.py`
+1. **Test with 2 samples**: `python contrastive_demonstration_generation.py`
 2. **Full run (600 samples)**: `python medcalc_with_contrastive_boosted_edits.py --sample-size 600`
 
 ## Summary: Minimal Setup Commands
@@ -139,7 +139,7 @@ export OPENAI_API_KEY="sk-..."
   cd MedCalc-Bench/dataset && unzip train_data.csv.zip && cd ../..
 
 # 5. Test
-python test_contrastive_edits.py
+python test_contrastive_demonstration_generation.py
 
 # 6. Run
 python medcalc_with_contrastive_boosted_edits.py --sample-size 600

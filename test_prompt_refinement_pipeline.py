@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-Quick Test Script for Pipeline Verification
+Quick Test Script for Prompt Refinement or Prompt Edits Pipeline
 
-This script runs a minimal test of the entire pipeline to verify everything works.
-Uses limited iterations and small batch size for speed.
 """
 
 import os
@@ -80,41 +78,7 @@ def main():
     else:
         print(f"❌ Unified prompt not found at {unified_prompt_file}")
         return False
-    
-    print("\n" + "="*60)
-    print("TEST 2: Contrastive Evaluation (SKIPPED - would take hours)")
-    print("="*60)
-    print("⏭️  Skipping full evaluation test (1047 examples)")
-    print("   Full evaluation test should be run separately when ready")
-    print("   Estimated time: 3-5 hours")
-    print("   Estimated cost: $40-60")
-    
-    # Test 3: Check imports and basic functionality
-    print("\n" + "="*60)
-    print("TEST 3: Import Verification")
-    print("="*60)
-    
-    try:
-        print("Importing contrastive_few_shot_evaluation...")
-        from contrastive_few_shot_evaluation import ContrastiveFewShotEvaluator
-        print("✅ contrastive_few_shot_evaluation imports successfully")
-        
-        print("Importing visualize_results...")
-        from visualize_results import ResultsVisualizer
-        print("✅ visualize_results imports successfully")
-        
-        print("Importing OpenAI...")
-        from openai import OpenAI
-        print("✅ OpenAI imports successfully")
-        
-        print("Importing MedCalc evaluate...")
-        sys.path.insert(0, str(Path(__file__).parent / "MedCalc-Bench" / "evaluation"))
-        from evaluate import check_correctness
-        print("✅ MedCalc evaluate imports successfully")
-        
-    except Exception as e:
-        print(f"❌ Import failed: {e}")
-        return False
+
     
     # Final summary
     print("\n" + "="*60)
@@ -133,10 +97,6 @@ def main():
     print(f"\n  python run_complete_pipeline.py \\")
     print(f"    --training-results-dir {training_dir} \\")
     print(f"    --batch-size 17")
-    print("\nOR use the test refined prompts directly:")
-    print(f"\n  python contrastive_few_shot_evaluation.py \\")
-    print(f"    --refined-prompts-dir outputs/test_refined_prompts \\")
-    print(f"    --training-results-dir {training_dir}")
     print("\nTest outputs saved to: outputs/test_refined_prompts/")
     
     return True

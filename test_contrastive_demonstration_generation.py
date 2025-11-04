@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Quick Test Script for MedCalc Contrastive Edits Pipeline
+Quick Test Script for Contrastive Demonstration Generation Pipeline
 
 This script runs a minimal test to verify the pipeline works correctly.
 """
