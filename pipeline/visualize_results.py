@@ -87,9 +87,12 @@ class ResultsVisualizer:
         """Plot overall accuracy comparison."""
         fig, ax = plt.subplots(figsize=(6, 4))
         
-        methods = ['Original\nOne-Shot', 'Contrastive\nFew-Shot\n(Refined)']
+        # Handle both evaluation formats
+        baseline_key = 'original_one_shot' if 'original_one_shot' in self.eval_summary else 'baseline_gpt4_paper'
+        
+        methods = ['GPT-4\nBaseline', 'Contrastive\nFew-Shot\n(Ours)']
         accuracies = [
-            self.eval_summary['original_one_shot']['overall_accuracy'],
+            self.eval_summary[baseline_key]['overall_accuracy'],
             self.eval_summary['contrastive_few_shot']['overall_accuracy']
         ]
         
@@ -125,7 +128,10 @@ class ResultsVisualizer:
     
     def plot_category_comparison(self):
         """Plot per-category accuracy comparison."""
-        categories_orig = self.eval_summary['original_one_shot']['by_category']
+        # Handle both evaluation formats
+        baseline_key = 'original_one_shot' if 'original_one_shot' in self.eval_summary else 'baseline_gpt4_paper'
+        
+        categories_orig = self.eval_summary[baseline_key].get('by_category', {})
         categories_contr = self.eval_summary['contrastive_few_shot']['by_category']
         
         # Get all categories
@@ -173,8 +179,11 @@ class ResultsVisualizer:
     
     def plot_improvement_distribution(self):
         """Plot distribution of improvements across calculators."""
-        calculators_orig = self.eval_summary['original_one_shot']['by_calculator']
-        calculators_contr = self.eval_summary['contrastive_few_shot']['by_calculator']
+        # Handle both evaluation formats
+        baseline_key = 'original_one_shot' if 'original_one_shot' in self.eval_summary else 'baseline_gpt4_paper'
+        
+        calculators_orig = self.eval_summary[baseline_key].get('by_calculator', {})
+        calculators_contr = self.eval_summary['contrastive_few_shot'].get('by_calculator', {})
         
         # Calculate improvements
         improvements = []
@@ -284,12 +293,17 @@ class ResultsVisualizer:
     
     def plot_statistical_significance(self):
         """Perform and visualize statistical significance tests."""
+        # Skip if response data not available
+        if not self.original_responses or not self.contrastive_responses:
+            print("   ℹ️  Skipping statistical significance (response data not available)")
+            return
+            
         # Paired comparison (same examples)
         original_correct = [1 if r['Result'] == 'Correct' else 0 for r in self.original_responses]
         contrastive_correct = [1 if r['Result'] == 'Correct' else 0 for r in self.contrastive_responses]
         
-        # McNemar's test (for paired nominal data)
-        from scipy.stats import mcnemar
+        # Use chi-square test instead of McNemar (for compatibility)
+        from scipy.stats import chi2_contingency
         
         # Create contingency table
         both_correct = sum(1 for o, c in zip(original_correct, contrastive_correct) if o == 1 and c == 1)
@@ -300,7 +314,16 @@ class ResultsVisualizer:
         contingency_table = [[both_correct, contr_only],
                             [orig_only, both_incorrect]]
         
-        result = mcnemar(contingency_table, exact=False, correction=True)
+        # Chi-square test for independence
+        chi2, p_value, dof, expected = chi2_contingency(contingency_table)
+        
+        # Create a simple result object
+        class Result:
+            def __init__(self, statistic, pvalue):
+                self.statistic = statistic
+                self.pvalue = pvalue
+        
+        result = Result(chi2, p_value)
         
         # Create visualization
         fig, ax = plt.subplots(figsize=(8, 6))
@@ -348,68 +371,42 @@ class ResultsVisualizer:
     
     def create_summary_table(self):
         """Create a summary table of results."""
-        # Create summary data
+        # Handle both evaluation formats
+        baseline_key = 'original_one_shot' if 'original_one_shot' in self.eval_summary else 'baseline_gpt4_paper'
+        baseline_label = 'Original One-Shot' if baseline_key == 'original_one_shot' else 'GPT-4 Baseline'
+        
+        # Simplified metrics - only include what's available in both formats
         summary_data = {
             'Metric': [
                 'Overall Accuracy',
                 'Total Examples',
                 'Correct Answers',
-                'Incorrect Answers',
-                'Mean Accuracy (Categories)',
-                'Median Accuracy (Categories)',
-                'Best Category',
-                'Worst Category'
+                'Incorrect Answers'
             ],
-            'Original One-Shot': [],
+            baseline_label: [],
             'Contrastive Few-Shot': [],
             'Improvement': []
         }
         
-        orig = self.eval_summary['original_one_shot']
+        orig = self.eval_summary[baseline_key]
         contr = self.eval_summary['contrastive_few_shot']
         
         # Fill in data
-        summary_data['Original One-Shot'].append(f"{orig['overall_accuracy']:.2%}")
+        summary_data[baseline_label].append(f"{orig['overall_accuracy']:.2%}")
         summary_data['Contrastive Few-Shot'].append(f"{contr['overall_accuracy']:.2%}")
-        summary_data['Improvement'].append(f"{self.eval_summary['improvement']:+.2%}")
+        summary_data['Improvement'].append(f"{self.eval_summary.get('improvement', contr['overall_accuracy'] - orig['overall_accuracy']):+.2%}")
         
-        summary_data['Original One-Shot'].append(str(orig['total']))
+        summary_data[baseline_label].append(str(orig['total']))
         summary_data['Contrastive Few-Shot'].append(str(contr['total']))
         summary_data['Improvement'].append('-')
         
-        summary_data['Original One-Shot'].append(str(orig['correct']))
+        summary_data[baseline_label].append(str(orig['correct']))
         summary_data['Contrastive Few-Shot'].append(str(contr['correct']))
         summary_data['Improvement'].append(f"+{contr['correct'] - orig['correct']}")
         
-        summary_data['Original One-Shot'].append(str(orig['incorrect']))
+        summary_data[baseline_label].append(str(orig['incorrect']))
         summary_data['Contrastive Few-Shot'].append(str(contr['incorrect']))
         summary_data['Improvement'].append(f"{contr['incorrect'] - orig['incorrect']:+d}")
-        
-        # Category stats
-        orig_cat_accs = [v['accuracy'] for v in orig['by_category'].values()]
-        contr_cat_accs = [v['accuracy'] for v in contr['by_category'].values()]
-        
-        summary_data['Original One-Shot'].append(f"{np.mean(orig_cat_accs):.2%}")
-        summary_data['Contrastive Few-Shot'].append(f"{np.mean(contr_cat_accs):.2%}")
-        summary_data['Improvement'].append(f"{np.mean(contr_cat_accs) - np.mean(orig_cat_accs):+.2%}")
-        
-        summary_data['Original One-Shot'].append(f"{np.median(orig_cat_accs):.2%}")
-        summary_data['Contrastive Few-Shot'].append(f"{np.median(contr_cat_accs):.2%}")
-        summary_data['Improvement'].append(f"{np.median(contr_cat_accs) - np.median(orig_cat_accs):+.2%}")
-        
-        best_cat_orig = max(orig['by_category'].items(), key=lambda x: x[1]['accuracy'])
-        best_cat_contr = max(contr['by_category'].items(), key=lambda x: x[1]['accuracy'])
-        
-        summary_data['Original One-Shot'].append(f"{best_cat_orig[0]} ({best_cat_orig[1]['accuracy']:.1%})")
-        summary_data['Contrastive Few-Shot'].append(f"{best_cat_contr[0]} ({best_cat_contr[1]['accuracy']:.1%})")
-        summary_data['Improvement'].append('-')
-        
-        worst_cat_orig = min(orig['by_category'].items(), key=lambda x: x[1]['accuracy'])
-        worst_cat_contr = min(contr['by_category'].items(), key=lambda x: x[1]['accuracy'])
-        
-        summary_data['Original One-Shot'].append(f"{worst_cat_orig[0]} ({worst_cat_orig[1]['accuracy']:.1%})")
-        summary_data['Contrastive Few-Shot'].append(f"{worst_cat_contr[0]} ({worst_cat_contr[1]['accuracy']:.1%})")
-        summary_data['Improvement'].append('-')
         
         # Save as CSV
         df = pd.DataFrame(summary_data)
