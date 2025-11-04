@@ -57,7 +57,7 @@ def main():
     
     refinement_cmd = [
         sys.executable,
-        'prompt_refinement_pipeline.py',
+        'pipeline/prompt_refinement_pipeline.py',
         '--results-dir', training_dir,
         '--batch-size', '10',
         '--max-iterations', '2',

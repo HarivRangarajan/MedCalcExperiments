@@ -62,21 +62,26 @@ class ResultsVisualizer:
         with open(eval_file, 'r') as f:
             self.eval_summary = json.load(f)
         
-        # Load responses
+        # Load responses (optional - only if files exist)
         self.original_responses = []
         original_file = self.evaluation_dir / "responses" / "original_one_shot_responses.jsonl"
-        with open(original_file, 'r') as f:
-            for line in f:
-                self.original_responses.append(json.loads(line))
+        if original_file.exists():
+            with open(original_file, 'r') as f:
+                for line in f:
+                    self.original_responses.append(json.loads(line))
+            print(f"   ✓ Loaded {len(self.original_responses)} original responses")
+        else:
+            print(f"   ℹ️  No original responses file found (using summary data only)")
         
         self.contrastive_responses = []
         contrastive_file = self.evaluation_dir / "responses" / "contrastive_few_shot_responses.jsonl"
-        with open(contrastive_file, 'r') as f:
-            for line in f:
-                self.contrastive_responses.append(json.loads(line))
-        
-        print(f"   ✓ Loaded {len(self.original_responses)} original responses")
-        print(f"   ✓ Loaded {len(self.contrastive_responses)} contrastive responses")
+        if contrastive_file.exists():
+            with open(contrastive_file, 'r') as f:
+                for line in f:
+                    self.contrastive_responses.append(json.loads(line))
+            print(f"   ✓ Loaded {len(self.contrastive_responses)} contrastive responses")
+        else:
+            print(f"   ℹ️  No contrastive responses file found (using summary data only)")
     
     def plot_overall_comparison(self):
         """Plot overall accuracy comparison."""

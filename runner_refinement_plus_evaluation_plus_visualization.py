@@ -119,7 +119,7 @@ Example:
         
         cmd = [
             sys.executable,
-            'prompt_refinement_pipeline.py',
+            'pipeline/prompt_refinement_pipeline.py',
             '--results-dir', args.training_results_dir,
             '--batch-size', str(args.batch_size)
         ]
@@ -155,7 +155,7 @@ Example:
         
         cmd = [
             sys.executable,
-            'evaluate_contrastive_fewshot_method.py',
+            'pipeline/evaluate_contrastive_fewshot_method.py',
             '--refined-prompts-dir', str(refined_prompts_dir),
             '--training-results-dir', args.training_results_dir,
             '--num-test-examples', '600',
@@ -192,7 +192,7 @@ Example:
     
     cmd = [
         sys.executable,
-        'visualize_results.py',
+        'pipeline/visualize_results.py',
         '--evaluation-dir', str(evaluation_dir)
     ]
     

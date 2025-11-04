@@ -10,8 +10,8 @@ import sys
 import os
 from pathlib import Path
 
-# Add the main script to the path
-sys.path.insert(0, str(Path(__file__).parent))
+# Add the pipeline directory to the path
+sys.path.insert(0, str(Path(__file__).parent / "pipeline"))
 
 from contrastive_demonstration_generation import MedCalcContrastiveEvaluationPipeline
 

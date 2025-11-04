@@ -9,8 +9,8 @@ import sys
 import os
 from pathlib import Path
 
-# Add the main script to the path
-sys.path.insert(0, str(Path(__file__).parent))
+# Add the pipeline directory to the path
+sys.path.insert(0, str(Path(__file__).parent.parent / "pipeline"))
 
 from contrastive_demonstration_generation import MedCalcContrastiveEvaluationPipeline
 
@@ -173,7 +173,7 @@ def test_pipeline():
     print("✅ ALL TESTS PASSED!")
     print(f"\nOutput directory: {pipeline.output_dir}")
     print("\nYou can now run the full pipeline with:")
-    print("  python contrastive_demonstration_generation.py --sample-size 500")
+    print("  python pipeline/contrastive_demonstration_generation.py --sample-size 500")
     
     return True
 

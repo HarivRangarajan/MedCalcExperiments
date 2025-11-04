@@ -97,26 +97,32 @@ Before running, ensure this structure exists:
 
 ```
 PromptResearch/
-├── medcalc-evaluation/                ← You are here
+├── medcalc-evaluation/                           ← You are here
 │   ├── MedCalc-Bench/
 │   │   ├── dataset/
-│   │   │   ├── train_data.csv        ← Must exist (unzip if needed)
+│   │   │   ├── train_data.csv                   ← Must exist (unzip if needed)
 │   │   │   └── test_data.csv
 │   │   └── evaluation/
 │   │       ├── llm_inference.py
 │   │       ├── evaluate.py
 │   │       └── run.py
-│   ├── contrastive_demonstration_generation.py
-│   ├── runner_contrastive_demonstration_generation.py
-│   ├── prompt_refinement_pipeline.py
-│   ├── evaluate_contrastive_fewshot_method.py
-│   ├── evaluate_baselines.py
-│   ├── runner_refinement_plus_evaluation_plus_visualization.py
-│   ├── visualize_results.py
+│   ├── runner_contrastive_demonstration_generation.py  ← Top-level runner
+│   ├── runner_refinement_plus_evaluation_plus_visualization.py  ← Top-level runner
+│   ├── pipeline/                                 ← Pipeline scripts
+│   │   ├── contrastive_demonstration_generation.py
+│   │   ├── prompt_refinement_pipeline.py
+│   │   ├── evaluate_contrastive_fewshot_method.py
+│   │   └── visualize_results.py
+│   ├── baseline_evaluation/                      ← Baseline comparisons
+│   │   └── evaluate_baselines.py
+│   ├── tests/                                    ← Test scripts
+│   │   ├── test_contrastive_demonstration_generation.py
+│   │   └── test_prompt_refinement_pipeline.py
+│   ├── modules/                                  ← Helper modules
 │   └── setup_and_run.sh
-├── promptengineer/                    ← Must exist
+├── promptengineer/                               ← Must exist
 └── mohs-llm-as-a-judge/
-    └── llm-judge-env/                 ← Virtual environment
+    └── llm-judge-env/                            ← Virtual environment
         └── bin/
             └── activate
 ```
@@ -142,7 +148,7 @@ python runner_contrastive_demonstration_generation.py
 
 **Full run (500 samples)**:
 ```bash
-python contrastive_demonstration_generation.py --sample-size 500
+python pipeline/contrastive_demonstration_generation.py --sample-size 500
 ```
 
 **Output**: Creates `outputs/medcalc_contrastive_edits_evaluation_TIMESTAMP/` with:
@@ -166,12 +172,12 @@ python contrastive_demonstration_generation.py --sample-size 500
 
 **Test refinement pipeline**:
 ```bash
-python test_prompt_refinement_pipeline.py
+python tests/test_prompt_refinement_pipeline.py
 ```
 
 **Full refinement** (requires Part 1 outputs):
 ```bash
-python prompt_refinement_pipeline.py \
+python pipeline/prompt_refinement_pipeline.py \
   --training-results-dir outputs/medcalc_contrastive_edits_evaluation_TIMESTAMP \
   --batch-size 17
 ```
@@ -197,7 +203,7 @@ python prompt_refinement_pipeline.py \
 Evaluates original MedCalc-Bench prompts and PromptEngineer techniques.
 
 ```bash
-python evaluate_baselines.py --sample-size 300 --output-dir results_baselines
+python baseline_evaluation/evaluate_baselines.py --sample-size 300 --output-dir results_baselines
 ```
 
 **What it evaluates**:
@@ -209,7 +215,7 @@ python evaluate_baselines.py --sample-size 300 --output-dir results_baselines
 Evaluates the refined contrastive few-shot prompt on the full test set.
 
 ```bash
-python evaluate_contrastive_fewshot_method.py \
+python pipeline/evaluate_contrastive_fewshot_method.py \
   --refined-prompts-dir outputs/test_refined_prompts \
   --training-results-dir outputs/medcalc_contrastive_edits_evaluation_20251010_054434 \
   --num-test-examples 600 \
@@ -240,7 +246,7 @@ python evaluate_contrastive_fewshot_method.py \
 ### Part 3C: Generate Visualizations
 
 ```bash
-python visualize_results.py \
+python pipeline/visualize_results.py \
   --evaluation-dir outputs/contrastive_evaluation_TIMESTAMP
 ```
 
@@ -280,7 +286,7 @@ python runner_refinement_plus_evaluation_plus_visualization.py \
 
 1. **Generate Contrastive Demonstrations** (Part 1)
    ```bash
-   python contrastive_demonstration_generation.py --sample-size 500
+   python pipeline/contrastive_demonstration_generation.py --sample-size 500
    ```
 
 2. **Refine Prompts + Evaluate + Visualize** (Parts 2 & 3)
@@ -309,10 +315,10 @@ export OPENAI_API_KEY="sk-..."
   cd MedCalc-Bench/dataset && unzip train_data.csv.zip && cd ../..
 
 # 5. Test Part 1
-python test_contrastive_demonstration_generation.py
+python tests/test_contrastive_demonstration_generation.py
 
 # 6. Run Part 1 (full)
-python contrastive_demonstration_generation.py --sample-size 500
+python pipeline/contrastive_demonstration_generation.py --sample-size 500
 
 # 7. Run Parts 2 & 3 (full pipeline)
 python runner_refinement_plus_evaluation_plus_visualization.py \
@@ -320,7 +326,7 @@ python runner_refinement_plus_evaluation_plus_visualization.py \
   --batch-size 17
 
 # Or run Part 3B separately with custom parameters
-python evaluate_contrastive_fewshot_method.py \
+python pipeline/evaluate_contrastive_fewshot_method.py \
   --refined-prompts-dir outputs/test_refined_prompts \
   --training-results-dir outputs/medcalc_contrastive_edits_evaluation_TIMESTAMP \
   --num-test-examples 600 \
@@ -328,38 +334,6 @@ python evaluate_contrastive_fewshot_method.py \
   --num-negative 1 \
   --batch-size 10 \
   --save-frequency 50
-```
-
----
-
-## Common Setup Issues
-
-### Issue: Virtual Environment Not Found
-
-```bash
-# Check if path exists
-ls ../mohs-llm-as-a-judge/llm-judge-env/bin/activate
-
-# If not found, you may need to create it or adjust the path
-```
-
-### Issue: MedCalc-Bench Not Found
-
-```bash
-# Clone or copy the MedCalc-Bench repository
-# Ensure train_data.csv is extracted from the zip
-```
-
-### Issue: PromptEngineer Not Found
-
-```bash
-# Check if promptengineer is installed
-python -c "import promptengineer; print('✅ Found')"
-
-# If not, install from the parent directory
-cd ../promptengineer
-pip install -e .
-cd ../medcalc-evaluation
 ```
 
 ---
