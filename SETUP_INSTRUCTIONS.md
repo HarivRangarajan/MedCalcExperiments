@@ -1,11 +1,26 @@
-# Setup Instructions: MedCalc Contrastive Boosted Edits
+# Setup Instructions: 
+
+## Part 1: Generating the contrastive demonstrations
+
+In a couple of sentences, this part takes care of the following:
+1. Takes the base prompt used in the MedCalcBench paper
+2. Creates `promptengineer` enhanced flavors of the base prompt (CoT, CoD...)
+3. Takes a subset of the train examples from the MedCalcBench dataset and generates responses for the subset
+4. Evaluates the above responses to create contrastive demonstrations (positve, negative)
+
+## What do we need to set up?
+
+1. You need to have the MedCalc-Bench dataset (of course)
+2. Install the `promptengineer` library (this is our custom dependency), and the rest of the library dependencies
+3. Have a Open AI API key
+4. That is pretty much all. Let the experiments begin!
 
 ## Quick Setup (Using Automated Script)
 
 The easiest way to get started:
 
 ```bash
-cd /path/to/PromptResearch/medcalc-evaluation
+cd to the place where you have cloned this repo
 export OPENAI_API_KEY="sk-..."
 ./setup_and_run.sh
 ```
@@ -14,7 +29,6 @@ The script will:
 1. ✅ Check all prerequisites
 2. ✅ Activate virtual environment
 3. ✅ Extract train data if needed
-4. ✅ Let you choose what to run
 
 ## Manual Setup
 
@@ -23,7 +37,7 @@ If you prefer to set things up manually:
 ### Step 1: Navigate to Directory
 
 ```bash
-cd /path/to/PromptResearch/medcalc-evaluation
+cd /to the place where you have cloned this repo
 ```
 
 ### Step 2: Activate Virtual Environment
@@ -64,54 +78,13 @@ if [ ! -f MedCalc-Bench/dataset/train_data.csv ]; then
 fi
 ```
 
-### Step 6: Run Test
-
-```bash
-python test_contrastive_edits.py
-```
-
-## Virtual Environment Details
-
-**Location**: `../mohs-llm-as-a-judge/llm-judge-env/`
-
-**Activation**:
-```bash
-# From medcalc-evaluation directory
-source ../mohs-llm-as-a-judge/llm-judge-env/bin/activate
-```
-
-**Deactivation**:
-```bash
-deactivate
-```
-
-**Check if Active**:
-```bash
-which python
-# Should show: .../mohs-llm-as-a-judge/llm-judge-env/bin/python
-```
-
-## Required Packages
-
-The virtual environment should already have:
-- `pandas` - Data manipulation
-- `numpy` - Numerical operations
-- `openai` - OpenAI API client
-- `tqdm` - Progress bars
-- `promptengineer` - Custom prompt engineering library
-
-If any are missing, install them:
-```bash
-pip install pandas numpy openai tqdm
-```
-
 ## Directory Structure Verification
 
 Before running, ensure this structure exists:
 
 ```
 PromptResearch/
-├── medcalc-evaluation/          ← You are here
+├── medcalc-experiements/          ← You are here
 │   ├── MedCalc-Bench/
 │   │   ├── dataset/
 │   │   │   ├── train_data.csv   ← Must exist (unzip if needed)
@@ -121,7 +94,6 @@ PromptResearch/
 │   │       ├── evaluate.py
 │   │       └── run.py
 │   ├── medcalc_with_contrastive_boosted_edits.py
-│   ├── test_contrastive_edits.py
 │   └── setup_and_run.sh         ← Automated setup script
 ├── promptengineer/               ← Must exist
 └── mohs-llm-as-a-judge/
@@ -141,122 +113,12 @@ ls ../mohs-llm-as-a-judge/llm-judge-env/bin/activate
 # If not found, you may need to create it or adjust the path
 ```
 
-### Issue: train_data.csv Missing
-
-```bash
-cd MedCalc-Bench/dataset
-ls train_data.csv.zip  # Should exist
-unzip train_data.csv.zip
-cd ../..
-```
-
-### Issue: Import Errors
-
-```bash
-# Make sure you're in the right directory
-pwd  # Should end with /medcalc-evaluation
-
-# Make sure virtual environment is active
-which python  # Should show venv path
-```
-
-### Issue: OpenAI API Key Not Set
-
-```bash
-# Set it in current session
-export OPENAI_API_KEY="sk-..."
-
-# Or add to your shell profile for persistence
-echo 'export OPENAI_API_KEY="sk-..."' >> ~/.bashrc  # or ~/.zshrc
-source ~/.bashrc  # or ~/.zshrc
-```
-
-## Environment Variables
-
-Required:
-- `OPENAI_API_KEY` - Your OpenAI API key
-
-Optional:
-- `HUGGINGFACE_TOKEN` - For HuggingFace models (not needed for OpenAI)
-
-## Test Your Setup
-
-Run the automated test to verify everything works:
-
-```bash
-# Make sure you're in medcalc-evaluation directory
-cd /path/to/PromptResearch/medcalc-evaluation
-
-# Activate virtual environment
-source ../mohs-llm-as-a-judge/llm-judge-env/bin/activate
-
-# Set API key
-export OPENAI_API_KEY="sk-..."
-
-# Run test
-python test_contrastive_edits.py
-```
-
-Expected output:
-```
-🧪 Testing MedCalc Contrastive Edits Pipeline
-============================================================
-
-✅ Virtual environment active
-
-1️⃣ Checking Prerequisites...
-   ✓ MedCalc-Bench directory found
-   ✓ train_data.csv found
-   ✓ OPENAI_API_KEY found
-
-2️⃣ Testing Pipeline Initialization...
-   ✓ Pipeline initialized successfully
-
-[... more tests ...]
-
-✅ ALL TESTS PASSED!
-```
-
 ## Next Steps After Setup
 
 Once setup is complete:
 
 1. **Test with 2 samples**: `python test_contrastive_edits.py`
-2. **Quick run (10 samples)**: `python run_medcalc_with_contrastive_boosted_edits.py`
-3. **Full run (500 samples)**: `python medcalc_with_contrastive_boosted_edits.py --sample-size 500`
-
-## Troubleshooting
-
-If you encounter issues:
-
-1. **Check virtual environment is active**:
-   ```bash
-   which python  # Should show venv path
-   ```
-
-2. **Verify all files exist**:
-   ```bash
-   ls MedCalc-Bench/dataset/train_data.csv
-   ls ../promptengineer/
-   ```
-
-3. **Test imports**:
-   ```bash
-   python -c "import pandas, numpy, openai; print('OK')"
-   ```
-
-4. **Check API key**:
-   ```bash
-   echo $OPENAI_API_KEY  # Should show your key
-   ```
-
-## Getting Help
-
-If setup still fails:
-
-1. Check `QUICK_START.md` for usage examples
-2. Check `CONTRASTIVE_EDITS_README.md` for detailed documentation
-3. Check `IMPLEMENTATION_SUMMARY.md` for technical details
+2. **Full run (600 samples)**: `python medcalc_with_contrastive_boosted_edits.py --sample-size 600`
 
 ## Summary: Minimal Setup Commands
 
@@ -278,10 +140,7 @@ export OPENAI_API_KEY="sk-..."
 python test_contrastive_edits.py
 
 # 6. Run
-python medcalc_with_contrastive_boosted_edits.py --sample-size 500
+python medcalc_with_contrastive_boosted_edits.py --sample-size 600
 ```
 
 ---
-
-**Ready to go?** Run the test script to verify your setup! ✨
-
