@@ -1,10 +1,10 @@
 #!/bin/bash
-# Setup and Run Script for MedCalc Contrastive Boosted Edits
+# Setup and test script for MedCalc Contrastive Boosted Edits
 # This script prepares the environment and runs the pipeline
 
 set -e  # Exit on error
 
-echo "🏥 MedCalc Contrastive Boosted Edits - Setup & Run"
+echo "🏥 MedCalc Contrastive Boosted Edits - Setup & Test"
 echo "=================================================="
 echo ""
 
