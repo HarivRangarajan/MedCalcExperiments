@@ -1,7 +1,9 @@
-"""
-Custom modules for MedCalc evaluation pipeline.
-"""
+"""Dataset evaluation modules."""
 
-from .custom_llm_judge import CustomLLMJudge
+from .base_pipeline import BaseEvaluationPipeline
+from .medcalc_pipeline import MedCalcEvaluationPipeline
 
-__all__ = ['CustomLLMJudge'] 
+__all__ = [
+    'BaseEvaluationPipeline',
+    'MedCalcEvaluationPipeline'
+]
