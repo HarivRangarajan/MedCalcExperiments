@@ -1,11 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Recreate the full refinement → evaluation → visualization pipeline command
-# Notes:
-# - pipeline/prompt_refinement_pipeline.py:229-253 caps refinement to 50 training rows with --batch-size 10 and --max-iterations 5
-# - pipeline/evaluate_contrastive_fewshot_method.py:169-180 limits MedCalc test coverage via --num-test-examples 100 while keeping 1 positive/negative contrastive example per query
-# - pipeline/visualize_results.py:1-34 only needs the evaluation directory to drop PNG/PDF figures into visualizations/
+# Full refinement → evaluation → visualization pipeline with model selection
+# Usage: ./run_refine_eval_visualize.sh --model gpt-4o
+#        ./run_refine_eval_visualize.sh --model gpt-5
+
+# Default model
+MODEL="gpt-4o"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --model)
+      MODEL="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      echo "Usage: $0 --model <model_name>" >&2
+      exit 1
+      ;;
+  esac
+done
 
 cd /Users/harivallabharangarajan/Desktop/CMU/PromptResearch/medcalc-evaluation
 source ../mohs-llm-as-a-judge/llm-judge-env/bin/activate
@@ -15,22 +31,32 @@ if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   exit 1
 fi
 
+echo "🚀 Running pipeline with model: $MODEL"
+echo "================================================"
+
+# Prompt refinement (always uses gpt-4o, evaluates on 170 training samples iteratively)
 python pipeline/prompt_refinement_pipeline.py \
   --results-dir /Users/harivallabharangarajan/Desktop/CMU/PromptResearch/outputs/medcalc_contrastive_edits_evaluation_20251010_054434 \
-  --batch-size 10 \
-  --max-iterations 5
+  --batch-size 17 \
+  --max-iterations 10
 
 REFINED_DIR=$(ls -td outputs/refined_prompts_* | head -n 1)
 
+# Full test set evaluation (1047 examples) with specified model
 python pipeline/evaluate_contrastive_fewshot_method.py \
   --refined-prompts-dir "$REFINED_DIR" \
   --training-results-dir /Users/harivallabharangarajan/Desktop/CMU/PromptResearch/outputs/medcalc_contrastive_edits_evaluation_20251010_054434 \
-  --num-test-examples 100 \
+  --num-test-examples 1047 \
   --num-positive 1 \
   --num-negative 1 \
-  --batch-size 10 \
-  --save-frequency 25
+  --batch-size 15 \
+  --save-frequency 50 \
+  --model "$MODEL"
 
 EVAL_DIR=$(ls -td outputs/contrastive_evaluation_* | head -n 1)
 
+# Generate visualizations
 python pipeline/visualize_results.py --evaluation-dir "$EVAL_DIR"
+
+echo "✅ Pipeline complete! Model: $MODEL"
+echo "📁 Results: $EVAL_DIR"

@@ -50,7 +50,8 @@ class ContrastiveFewShotEvaluator:
                  num_positive: int = 1,
                  num_negative: int = 1,
                  batch_size: int = 10,
-                 save_frequency: int = 50):
+                 save_frequency: int = 50,
+                 model: str = "gpt-4o"):
         """
         Initialize the evaluator.
         
@@ -64,8 +65,10 @@ class ContrastiveFewShotEvaluator:
             num_negative: Number of negative contrastive examples (default: 1)
             batch_size: Batch size for OpenAI API calls (default: 10)
             save_frequency: Save progress every N examples (default: 50)
+            model: OpenAI model to use (default: gpt-4o)
         """
         self.api_key = api_key
+        self.model = model
         self.client = OpenAI(api_key=api_key)
         self.async_client = AsyncOpenAI(api_key=api_key)
         self.refined_prompts_dir = Path(refined_prompts_dir)
@@ -371,7 +374,7 @@ class ContrastiveFewShotEvaluator:
             ]
             
             response = await self.async_client.chat.completions.create(
-                model="gpt-4o",
+                model=self.model,
                 messages=messages
             )
             
@@ -694,6 +697,13 @@ def main():
         help='Save progress every N examples (default: 50)'
     )
     
+    parser.add_argument(
+        '--model',
+        type=str,
+        default='gpt-4o',
+        help='OpenAI model to use for evaluation (default: gpt-4o)'
+    )
+    
     args = parser.parse_args()
     
     # Get API key
@@ -712,7 +722,8 @@ def main():
         num_positive=args.num_positive,
         num_negative=args.num_negative,
         batch_size=args.batch_size,
-        save_frequency=args.save_frequency
+        save_frequency=args.save_frequency,
+        model=args.model
     )
     
     results = evaluator.run_complete_evaluation()

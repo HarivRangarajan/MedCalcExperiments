@@ -17,10 +17,24 @@ from pathlib import Path
 from typing import Dict, List, Any, Tuple
 from datetime import datetime
 import argparse
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 from tqdm import tqdm
 import warnings
 warnings.filterwarnings('ignore')
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend
+import asyncio
+import re
+
+# Add MedCalc evaluation imports
+sys.path.insert(0, str(Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation"))
+try:
+    from evaluate import check_correctness
+except ImportError as e:
+    print(f"⚠️  MedCalc evaluation imports failed: {e}")
+    check_correctness = None
 
 
 class PromptRefinementPipeline:
@@ -44,6 +58,7 @@ class PromptRefinementPipeline:
         """
         self.api_key = api_key
         self.client = OpenAI(api_key=api_key)
+        self.async_client = AsyncOpenAI(api_key=api_key)
         self.results_dir = Path(results_dir)
         self.batch_size = batch_size
         self.max_iterations = max_iterations
@@ -58,12 +73,20 @@ class PromptRefinementPipeline:
         (self.output_dir / "iterations").mkdir(exist_ok=True)
         (self.output_dir / "final").mkdir(exist_ok=True)
         (self.output_dir / "logs").mkdir(exist_ok=True)
+        (self.output_dir / "evaluation_progress").mkdir(exist_ok=True)
+        
+        # Load training examples for evaluation
+        self.training_examples = self._load_training_examples()
+        
+        # Track evaluation progress
+        self.evaluation_history = []
         
         print(f"✅ Refinement pipeline initialized")
         print(f"   • Results dir: {self.results_dir}")
         print(f"   • Output dir: {self.output_dir}")
         print(f"   • Batch size: {self.batch_size}")
         print(f"   • Max iterations: {self.max_iterations or 'unlimited'}")
+        print(f"   • Training examples for evaluation: {len(self.training_examples)}")
     
     def load_results(self, prompt_type: str) -> Tuple[List[Dict], List[Dict]]:
         """Load correct and incorrect responses for a prompt type."""
@@ -97,6 +120,175 @@ class PromptRefinementPipeline:
             return prompts[prompt_type]['prompt']
         else:
             raise ValueError(f"Prompt type '{prompt_type}' not found in enhanced prompts")
+    
+    def _load_training_examples(self) -> pd.DataFrame:
+        """Load the 170 training examples used for contrastive generation."""
+        # Load the saved indices
+        indices_file = self.results_dir / "data" / "training_sample_indices.json"
+        
+        if not indices_file.exists():
+            print(f"⚠️  Training sample indices not found, regenerating from correct/incorrect files...")
+            # Regenerate from correct/incorrect files
+            row_numbers = set()
+            for subdir in ['correct', 'incorrect']:
+                subdir_path = self.results_dir / subdir
+                if subdir_path.exists():
+                    for jsonl_file in subdir_path.glob('*.jsonl'):
+                        with open(jsonl_file, 'r') as f:
+                            for line in f:
+                                data = json.loads(line)
+                                row_numbers.add(data['Row Number'])
+            
+            # Save indices for future use
+            (self.results_dir / "data").mkdir(exist_ok=True)
+            with open(indices_file, 'w') as f:
+                json.dump(sorted(list(row_numbers)), f)
+            print(f"   ✓ Saved {len(row_numbers)} training indices")
+        else:
+            with open(indices_file, 'r') as f:
+                row_numbers = json.load(f)
+            print(f"   ✓ Loaded {len(row_numbers)} training sample indices")
+        
+        # Load the full train_data.csv
+        train_data_path = Path(__file__).parent.parent / "MedCalc-Bench" / "dataset" / "train_data.csv"
+        df = pd.read_csv(train_data_path)
+        
+        # Filter to only the 170 examples
+        df_filtered = df[df['Row Number'].isin(row_numbers)].copy()
+        
+        print(f"   ✓ Loaded {len(df_filtered)} training examples for evaluation")
+        return df_filtered
+    
+    def _extract_answer(self, answer: str, calid: int) -> str:
+        """Extract answer from LLM response (same method as other scripts)."""
+        extracted_answer = re.findall(r'[Aa]nswer":\s*(.*?)\}', answer)
+        
+        if len(extracted_answer) == 0:
+            extracted_answer = "Not Found"
+        else:
+            extracted_answer = extracted_answer[-1].strip().strip('"')
+            if extracted_answer in ["str(short_and_direct_answer_of_the_question)", 
+                                   "str(value which is the answer to the question)", "X.XX"]:
+                extracted_answer = "Not Found"
+        
+        return extracted_answer
+    
+    async def _evaluate_single_example_async(self, prompt: str, row: pd.Series) -> Dict[str, Any]:
+        """Evaluate a single example asynchronously."""
+        try:
+            # Create messages
+            user_msg = f"Patient Note:\n{row['Patient Note']}\n\nQuestion: {row['Question']}"
+            messages = [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": user_msg}
+            ]
+            
+            # Generate response
+            response = await self.async_client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages
+            )
+            
+            answer = response.choices[0].message.content
+            answer = re.sub(r"\s+", " ", answer)
+            
+            # Extract answer value using the proper extraction method
+            answer_value = self._extract_answer(answer, int(row['Calculator ID']))
+            
+            # Check correctness
+            is_correct = False
+            if check_correctness and answer_value != "Not Found":
+                try:
+                    is_correct = check_correctness(
+                        answer_value,
+                        row['Ground Truth Answer'],
+                        int(row['Calculator ID']),
+                        row['Upper Limit'],
+                        row['Lower Limit']
+                    )
+                except Exception as eval_error:
+                    # If evaluation fails, mark as incorrect
+                    is_correct = False
+            
+            return {
+                'correct': is_correct,
+                'answer': answer_value,
+                'ground_truth': row['Ground Truth Answer']
+            }
+        except Exception as e:
+            # Silently handle errors to avoid cluttering output
+            return {'correct': False, 'answer': None, 'ground_truth': row['Ground Truth Answer']}
+    
+    async def _evaluate_prompt_on_training_set_async(self, prompt: str) -> float:
+        """Evaluate a prompt on the 170 training examples."""
+        print(f"\n      📊 Evaluating prompt on {len(self.training_examples)} training examples...")
+        
+        # Create tasks for all examples
+        tasks = []
+        for _, row in self.training_examples.iterrows():
+            task = self._evaluate_single_example_async(prompt, row)
+            tasks.append(task)
+        
+        # Run all evaluations in parallel (with batching to avoid rate limits)
+        batch_size = 10
+        all_results = []
+        
+        for i in range(0, len(tasks), batch_size):
+            batch = tasks[i:i+batch_size]
+            batch_results = await asyncio.gather(*batch)
+            all_results.extend(batch_results)
+        
+        # Calculate accuracy
+        correct_count = sum(1 for r in all_results if r['correct'])
+        accuracy = correct_count / len(all_results) if all_results else 0.0
+        
+        print(f"      ✓ Accuracy: {accuracy:.2%} ({correct_count}/{len(all_results)} correct)")
+        return accuracy
+    
+    def evaluate_prompt_on_training_set(self, prompt: str) -> float:
+        """Synchronous wrapper for evaluation."""
+        return asyncio.run(self._evaluate_prompt_on_training_set_async(prompt))
+    
+    def plot_evaluation_progress(self):
+        """Generate a plot showing accuracy improvement over iterations."""
+        if not self.evaluation_history:
+            print("⚠️  No evaluation history to plot")
+            return
+        
+        iterations = [entry['iteration'] for entry in self.evaluation_history]
+        accuracies = [entry['accuracy'] for entry in self.evaluation_history]
+        
+        plt.figure(figsize=(10, 6))
+        plt.plot(iterations, accuracies, marker='o', linewidth=2, markersize=8)
+        plt.xlabel('Refinement Iteration', fontsize=12)
+        plt.ylabel('Accuracy on Training Set (%)', fontsize=12)
+        plt.title('Prompt Refinement Progress: Accuracy vs Iteration', fontsize=14, fontweight='bold')
+        plt.grid(True, alpha=0.3)
+        
+        # Format y-axis as percentage
+        plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y*100:.1f}%'))
+        
+        # Add value labels on points
+        for i, (it, acc) in enumerate(zip(iterations, accuracies)):
+            plt.text(it, acc, f'{acc*100:.1f}%', ha='center', va='bottom', fontsize=9)
+        
+        plt.tight_layout()
+        
+        # Save plot
+        plot_path = self.output_dir / "evaluation_progress" / "accuracy_progress.png"
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        print(f"\n📊 Evaluation progress plot saved: {plot_path}")
+        
+        # Also save as PDF
+        pdf_path = self.output_dir / "evaluation_progress" / "accuracy_progress.pdf"
+        plt.savefig(pdf_path, bbox_inches='tight')
+        plt.close()
+        
+        # Save data as JSON
+        data_path = self.output_dir / "evaluation_progress" / "accuracy_history.json"
+        with open(data_path, 'w') as f:
+            json.dump(self.evaluation_history, f, indent=2)
+        print(f"📄 Evaluation history saved: {data_path}")
     
     def create_refinement_instruction(self, 
                                      current_prompt: str,
@@ -267,16 +459,27 @@ Provide ONLY the refined prompt text. Do not include explanations or meta-commen
                 current_prompt, correct_batch, incorrect_batch, iteration
             )
             
+            # Evaluate the refined prompt on training set
+            accuracy = self.evaluate_prompt_on_training_set(refined_prompt)
+            
             # Store iteration info
             iteration_info = {
                 "iteration": iteration,
                 "prompt": refined_prompt,
                 "num_correct": len(correct_batch),
                 "num_incorrect": len(incorrect_batch),
+                "accuracy": accuracy,
                 "timestamp": datetime.now().isoformat()
             }
             
             refinement_history.append(iteration_info)
+            
+            # Track evaluation history
+            self.evaluation_history.append({
+                "iteration": iteration,
+                "accuracy": accuracy,
+                "prompt_type": prompt_type
+            })
             
             # Save intermediate result
             iter_file = self.output_dir / "iterations" / f"{prompt_type}_iteration_{iteration}.json"
@@ -467,6 +670,10 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
             iters = len(all_refinement_history.get(pt, []))
             print(f"      - {pt}: {iters} iterations")
         print(f"   • Unified prompt created: {len(unified_prompt)} characters")
+        
+        # Generate evaluation progress plot
+        self.plot_evaluation_progress()
+        
         print(f"\n📁 All outputs saved to: {self.output_dir}/")
         
         return {
