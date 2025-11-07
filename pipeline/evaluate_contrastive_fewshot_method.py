@@ -29,8 +29,8 @@ import asyncio
 import warnings
 warnings.filterwarnings('ignore')
 
-# Add MedCalc evaluation imports
-sys.path.insert(0, str(Path(__file__).parent / "MedCalc-Bench" / "evaluation"))
+# Add MedCalc evaluation imports (go up to medcalc-evaluation directory first)
+sys.path.insert(0, str(Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation"))
 try:
     from evaluate import check_correctness
 except ImportError as e:
@@ -101,7 +101,7 @@ class ContrastiveFewShotEvaluator:
     def _load_one_shot_examples(self) -> Dict[str, Any]:
         """Load MedCalc's original one-shot examples."""
         try:
-            one_shot_file = Path(__file__).parent / "MedCalc-Bench" / "evaluation" / "one_shot_finalized_explanation.json"
+            one_shot_file = Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation" / "one_shot_finalized_explanation.json"
             if one_shot_file.exists():
                 with open(one_shot_file, 'r') as f:
                     examples = json.load(f)
@@ -168,7 +168,7 @@ class ContrastiveFewShotEvaluator:
     
     def load_test_data(self) -> pd.DataFrame:
         """Load MedCalc test data."""
-        test_data_path = Path(__file__).parent / "MedCalc-Bench" / "dataset" / "test_data.csv"
+        test_data_path = Path(__file__).parent.parent / "MedCalc-Bench" / "dataset" / "test_data.csv"
         df = pd.read_csv(test_data_path)
         
         if self.num_test_examples is not None:

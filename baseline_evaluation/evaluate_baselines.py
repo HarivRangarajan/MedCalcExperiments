@@ -84,8 +84,8 @@ except ImportError as e:
     print(f"   Looking for: {Path(__file__).parent / 'modules' / 'custom_llm_judge.py'}")
     LLMJudge = None
 
-# MedCalc evaluation imports
-sys.path.insert(0, str(Path(__file__).parent / "MedCalc-Bench" / "evaluation"))
+# MedCalc evaluation imports (go up to medcalc-evaluation directory first)
+sys.path.insert(0, str(Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation"))
 try:
     from llm_inference import GPTInference
     from evaluate import evaluate_answer
@@ -179,7 +179,7 @@ class MedCalcEvaluationPipeline:
         print("="*60)
         
         # Load test data
-        test_data_path = Path(__file__).parent / "MedCalc-Bench" / "dataset" / "test_data.csv"
+        test_data_path = Path(__file__).parent.parent / "MedCalc-Bench" / "dataset" / "test_data.csv"
         df = pd.read_csv(test_data_path)
         
         print(f"✅ Loaded {len(df)} total examples from MedCalc-Bench")

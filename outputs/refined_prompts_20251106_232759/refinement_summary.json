@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-11-06T23:29:06.722598",
+  "results_dir": "/Users/harivallabharangarajan/Desktop/CMU/PromptResearch/outputs/medcalc_contrastive_edits_evaluation_20251010_054434",
+  "output_dir": "/Users/harivallabharangarajan/Desktop/CMU/PromptResearch/medcalc-evaluation/outputs/refined_prompts_20251106_232759",
+  "batch_size": 10,
+  "max_iterations": 5,
+  "prompt_types_processed": [
+    "chain_of_thought",
+    "chain_of_draft"
+  ],
+  "refinement_iterations": {
+    "chain_of_thought": 5,
+    "chain_of_draft": 5
+  },
+  "final_prompts_file": "/Users/harivallabharangarajan/Desktop/CMU/PromptResearch/medcalc-evaluation/outputs/refined_prompts_20251106_232759/final/final_refined_prompts.json",
+  "unified_prompt_file": "/Users/harivallabharangarajan/Desktop/CMU/PromptResearch/medcalc-evaluation/outputs/refined_prompts_20251106_232759/final/unified_prompt.txt"
+}

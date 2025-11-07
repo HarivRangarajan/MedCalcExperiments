@@ -29,8 +29,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "promptengineer"))
 from promptengineer import PromptPipeline
 from promptengineer.techniques.base import PromptContext
 
-# MedCalc evaluation imports
-sys.path.insert(0, str(Path(__file__).parent / "MedCalc-Bench" / "evaluation"))
+# MedCalc evaluation imports (go up to medcalc-evaluation directory first)
+sys.path.insert(0, str(Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation"))
 
 # Try importing with fallback for OpenAI-only usage
 try:
@@ -121,7 +121,7 @@ class MedCalcContrastiveEvaluationPipeline:
     def _load_medcalc_one_shot_examples(self) -> Dict[str, Any]:
         """Load MedCalc's original one-shot examples for calculator-specific prompting."""
         try:
-            one_shot_file = Path(__file__).parent / "MedCalc-Bench" / "evaluation" / "one_shot_finalized_explanation.json"
+            one_shot_file = Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation" / "one_shot_finalized_explanation.json"
             if one_shot_file.exists():
                 with open(one_shot_file, 'r') as f:
                     examples = json.load(f)
@@ -143,7 +143,7 @@ class MedCalcContrastiveEvaluationPipeline:
         print("="*60)
         
         # Load train data
-        train_data_path = Path(__file__).parent / "MedCalc-Bench" / "dataset" / "train_data.csv"
+        train_data_path = Path(__file__).parent.parent / "MedCalc-Bench" / "dataset" / "train_data.csv"
         df = pd.read_csv(train_data_path)
         
         print(f"✅ Loaded {len(df)} total examples from MedCalc-Bench train data")

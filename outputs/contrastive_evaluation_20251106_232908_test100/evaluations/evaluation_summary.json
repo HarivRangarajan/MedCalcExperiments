@@ -1,0 +1,70 @@
+{
+  "timestamp": "2025-11-06T23:30:07.145026",
+  "test_set_size": 100,
+  "configuration": {
+    "num_positive_examples": 1,
+    "num_negative_examples": 1,
+    "api_batch_size": 10,
+    "save_frequency": 25
+  },
+  "baseline_gpt4_paper": {
+    "prompt_type": "gpt4_one_shot_paper",
+    "overall_accuracy": 0.5091,
+    "total": 1047,
+    "correct": 533,
+    "incorrect": 514,
+    "source": "MedCalc-Bench paper"
+  },
+  "contrastive_few_shot": {
+    "prompt_type": "contrastive_few_shot",
+    "overall_accuracy": 0.65,
+    "total": 100,
+    "correct": 65,
+    "incorrect": 35,
+    "by_category": {
+      "lab": {
+        "total": 40,
+        "correct": 15,
+        "accuracy": 0.375
+      },
+      "risk": {
+        "total": 20,
+        "correct": 10,
+        "accuracy": 0.5
+      },
+      "physical": {
+        "total": 40,
+        "correct": 40,
+        "accuracy": 1.0
+      }
+    },
+    "by_calculator": {
+      "Creatinine Clearance (Cockcroft-Gault Equation)": {
+        "total": 20,
+        "correct": 10,
+        "accuracy": 0.5
+      },
+      "CKD-EPI Equations for Glomerular Filtration Rate": {
+        "total": 20,
+        "correct": 5,
+        "accuracy": 0.25
+      },
+      "CHA2DS2-VASc Score for Atrial Fibrillation Stroke Risk": {
+        "total": 20,
+        "correct": 10,
+        "accuracy": 0.5
+      },
+      "Mean Arterial Pressure (MAP)": {
+        "total": 20,
+        "correct": 20,
+        "accuracy": 1.0
+      },
+      "Body Mass Index (BMI)": {
+        "total": 20,
+        "correct": 20,
+        "accuracy": 1.0
+      }
+    }
+  },
+  "improvement": 0.14090000000000003
+}
