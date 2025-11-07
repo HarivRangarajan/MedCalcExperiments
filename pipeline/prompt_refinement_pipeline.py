@@ -28,13 +28,13 @@ matplotlib.use('Agg')  # Non-interactive backend
 import asyncio
 import re
 
-# Add MedCalc evaluation imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation"))
-try:
-    from evaluate import check_correctness
-except ImportError as e:
-    print(f"⚠️  MedCalc evaluation imports failed: {e}")
-    check_correctness = None
+# Import shared utilities
+from shared_utils import (
+    load_medcalc_one_shot_examples,
+    extract_answer,
+    create_one_shot_prompt,
+    evaluate_answer
+)
 
 
 class PromptRefinementPipeline:
@@ -79,7 +79,7 @@ class PromptRefinementPipeline:
         self.training_examples = self._load_training_examples()
         
         # Load MedCalc one-shot examples for proper evaluation
-        self.one_shot_examples = self._load_medcalc_one_shot_examples()
+        self.one_shot_examples = load_medcalc_one_shot_examples()
         
         # Track evaluation progress
         self.evaluation_history = []
@@ -163,35 +163,6 @@ class PromptRefinementPipeline:
         print(f"   ✓ Loaded {len(df_filtered)} training examples for evaluation")
         return df_filtered
     
-    def _load_medcalc_one_shot_examples(self) -> Dict[str, Any]:
-        """Load MedCalc's original one-shot examples for calculator-specific prompting."""
-        try:
-            one_shot_file = Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation" / "one_shot_finalized_explanation.json"
-            if one_shot_file.exists():
-                with open(one_shot_file, 'r') as f:
-                    examples = json.load(f)
-                return examples
-            else:
-                print(f"⚠️  One-shot examples file not found")
-                return {}
-        except Exception as e:
-            print(f"⚠️  Error loading one-shot examples: {e}")
-            return {}
-    
-    def _extract_answer(self, answer: str, calid: int) -> str:
-        """Extract answer from LLM response (same method as other scripts)."""
-        extracted_answer = re.findall(r'[Aa]nswer":\s*(.*?)\}', answer)
-        
-        if len(extracted_answer) == 0:
-            extracted_answer = "Not Found"
-        else:
-            extracted_answer = extracted_answer[-1].strip().strip('"')
-            if extracted_answer in ["str(short_and_direct_answer_of_the_question)", 
-                                   "str(value which is the answer to the question)", "X.XX"]:
-                extracted_answer = "Not Found"
-        
-        return extracted_answer
-    
     async def _evaluate_single_example_async(self, prompt: str, row: pd.Series) -> Dict[str, Any]:
         """Evaluate a single example asynchronously."""
         try:
@@ -199,13 +170,14 @@ class PromptRefinementPipeline:
             calculator_id = str(row['Calculator ID'])
             one_shot_example = self.one_shot_examples.get(calculator_id, {})
             
-            # Create messages with one-shot example (same format as contrastive generation)
+            # Create messages with one-shot example using shared utility
             if one_shot_example:
-                # Use enhanced prompt + one-shot example (same as contrastive_demonstration_generation.py lines 318-323)
-                system_msg = prompt + f'\n\nHere is an example patient note:\n\n{one_shot_example["Patient Note"]}'
-                system_msg += f'\n\nHere is an example task:\n\n{row["Question"]}'
-                system_msg += f'\n\nHere is the expected output:\n\n{json.dumps({"step_by_step_thinking": one_shot_example["Response"]["step_by_step_thinking"], "answer": one_shot_example["Response"]["answer"]})}'
-                user_msg = f'Here is the patient note:\n\n{row["Patient Note"]}\n\nHere is the task:\n\n{row["Question"]}\n\nPlease directly output the JSON dict.'
+                system_msg, user_msg = create_one_shot_prompt(
+                    prompt,
+                    row["Patient Note"],
+                    row["Question"],
+                    one_shot_example
+                )
             else:
                 # Fallback if no one-shot example available
                 system_msg = prompt
@@ -225,23 +197,17 @@ class PromptRefinementPipeline:
             answer = response.choices[0].message.content
             answer = re.sub(r"\s+", " ", answer)
             
-            # Extract answer value using the proper extraction method
-            answer_value = self._extract_answer(answer, int(row['Calculator ID']))
+            # Extract answer value using shared utility
+            answer_value = extract_answer(answer, int(row['Calculator ID']))
             
-            # Check correctness
-            is_correct = False
-            if check_correctness and answer_value != "Not Found":
-                try:
-                    is_correct = check_correctness(
-                        answer_value,
-                        row['Ground Truth Answer'],
-                        int(row['Calculator ID']),
-                        row['Upper Limit'],
-                        row['Lower Limit']
-                    )
-                except Exception as eval_error:
-                    # If evaluation fails, mark as incorrect
-                    is_correct = False
+            # Check correctness using shared utility
+            is_correct = evaluate_answer(
+                answer_value,
+                row['Ground Truth Answer'],
+                int(row['Calculator ID']),
+                row['Upper Limit'],
+                row['Lower Limit']
+            )
             
             return {
                 'correct': is_correct,

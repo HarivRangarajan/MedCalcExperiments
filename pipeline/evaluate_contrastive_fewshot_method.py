@@ -29,13 +29,12 @@ import asyncio
 import warnings
 warnings.filterwarnings('ignore')
 
-# Add MedCalc evaluation imports (go up to medcalc-evaluation directory first)
-sys.path.insert(0, str(Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation"))
-try:
-    from evaluate import check_correctness
-except ImportError as e:
-    print(f"⚠️  MedCalc evaluation imports failed: {e}")
-    sys.exit(1)
+# Import shared utilities
+from shared_utils import (
+    load_medcalc_one_shot_examples,
+    extract_answer as extract_answer_util,
+    evaluate_answer
+)
 
 
 class ContrastiveFewShotEvaluator:
@@ -90,8 +89,8 @@ class ContrastiveFewShotEvaluator:
         for subdir in ["responses", "evaluations", "logs", "visualizations"]:
             (self.output_dir / subdir).mkdir(exist_ok=True)
         
-        # Load one-shot examples
-        self.one_shot_examples = self._load_one_shot_examples()
+        # Load one-shot examples using shared utility
+        self.one_shot_examples = load_medcalc_one_shot_examples()
         
         # Load contrastive examples
         self.contrastive_examples = self._load_contrastive_examples()
@@ -100,22 +99,7 @@ class ContrastiveFewShotEvaluator:
         print(f"   • Refined prompts: {self.refined_prompts_dir}")
         print(f"   • Training results: {self.training_results_dir}")
         print(f"   • Output dir: {self.output_dir}")
-    
-    def _load_one_shot_examples(self) -> Dict[str, Any]:
-        """Load MedCalc's original one-shot examples."""
-        try:
-            one_shot_file = Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation" / "one_shot_finalized_explanation.json"
-            if one_shot_file.exists():
-                with open(one_shot_file, 'r') as f:
-                    examples = json.load(f)
-                print(f"   ✓ Loaded {len(examples)} one-shot examples")
-                return examples
-            else:
-                print(f"   ⚠️  One-shot examples file not found")
-                return {}
-        except Exception as e:
-            print(f"   ⚠️  Error loading one-shot examples: {e}")
-            return {}
+        print(f"   ✓ Loaded {len(self.one_shot_examples)} one-shot examples")
     
     def _load_contrastive_examples(self) -> Dict[str, Dict[str, List[Dict]]]:
         """Load contrastive examples (correct and incorrect) organized by calculator ID."""
@@ -224,21 +208,22 @@ class ContrastiveFewShotEvaluator:
                                        note: str, 
                                        question: str, 
                                        calculator_id: str) -> Tuple[str, str]:
-        """Create the original MedCalc one-shot prompt."""
+        """Create the original MedCalc one-shot prompt using shared utility."""
         example = self.one_shot_examples.get(calculator_id)
         
         if example is None:
-            # Fallback to zero-shot if no example available
-            system_msg = 'You are a helpful assistant for calculating a score for a given patient note. Please think step-by-step to solve the question and then generate the required score. Your output should only contain a JSON dict formatted as {{"step_by_step_thinking": str(your_step_by_step_thinking_procress_to_solve_the_question), "answer": str(short_and_direct_answer_of_the_question)}}.'
-            user_msg = f'Here is the patient note:\n\n{note}\n\nHere is the task:\n\n{question}\n\nPlease directly output the JSON dict formatted as {{"step_by_step_thinking": str(your_step_by_step_thinking_procress_to_solve_the_question), "answer": str(short_and_direct_answer_of_the_question)}}:'
-        else:
-            system_msg = 'You are a helpful assistant for calculating a score for a given patient note. Please think step-by-step to solve the question and then generate the required score. Your output should only contain a JSON dict formatted as {{"step_by_step_thinking": str(your_step_by_step_thinking_procress_to_solve_the_question), "answer": str(short_and_direct_answer_of_the_question)}}.'
-            system_msg += f'Here is an example patient note:\n\n{example["Patient Note"]}'
-            system_msg += f'\n\nHere is an example task:\n\n{question}'
-            system_msg += f'\n\nPlease directly output the JSON dict formatted as {{"step_by_step_thinking": str(your_step_by_step_thinking_procress_to_solve_the_question), "answer": str(value which is the answer to the question)}}:\n\n{json.dumps({"step_by_step_thinking": example["Response"]["step_by_step_thinking"], "answer": example["Response"]["answer"]})}'
-            user_msg = f'Here is the patient note:\n\n{note}\n\nHere is the task:\n\n{question}\n\nPlease directly output the JSON dict formatted as {{"step_by_step_thinking": str(your_step_by_step_thinking_procress_to_solve_the_question), "answer": str(short_and_direct_answer_of_the_question)}}:'
+            raise ValueError(f"No one-shot example found for calculator ID {calculator_id}. "
+                           f"Cannot create prompt without example.")
         
-        return system_msg, user_msg
+        # Use shared utility for one-shot prompt
+        from shared_utils import create_original_one_shot_prompt as create_original_prompt
+        return create_original_prompt(
+            note,
+            question,
+            example["Patient Note"],
+            {"step_by_step_thinking": example["Response"]["step_by_step_thinking"], 
+             "answer": example["Response"]["answer"]}
+        )
     
     def create_contrastive_few_shot_prompt(self,
                                           note: str,
@@ -289,22 +274,16 @@ class ContrastiveFewShotEvaluator:
         return system_msg, user_msg
     
     def extract_answer(self, answer: str, calid: int) -> Tuple[str, str]:
-        """Extract answer and explanation from LLM response (same as original)."""
-        extracted_answer = re.findall(r'[Aa]nswer":\s*(.*?)\}', answer)
+        """Extract answer and explanation from LLM response."""
+        # Extract explanation
         matches = re.findall(r'"step_by_step_thinking":\s*"([^"]+)"\s*,\s*"[Aa]nswer"', answer)
-        
         if matches:
             explanation = matches[-1]    
         else:
             explanation = "No Explanation"
         
-        if len(extracted_answer) == 0:
-            extracted_answer = "Not Found"
-        else:
-            extracted_answer = extracted_answer[-1].strip().strip('"')
-            if extracted_answer in ["str(short_and_direct_answer_of_the_question)", 
-                                   "str(value which is the answer to the question)", "X.XX"]:
-                extracted_answer = "Not Found"
+        # Extract answer using shared utility
+        extracted_answer = extract_answer_util(answer, calid)
         
         # Handle different calculator output types (simplified)
         if calid in [13, 68]:
@@ -384,8 +363,8 @@ class ContrastiveFewShotEvaluator:
             # Extract answer and explanation
             answer_value, explanation = self.extract_answer(answer, int(calculator_id))
             
-            # Check correctness
-            correctness = check_correctness(
+            # Check correctness using shared utility
+            correctness = evaluate_answer(
                 answer_value,
                 row["Ground Truth Answer"],
                 calculator_id,
@@ -455,8 +434,11 @@ class ContrastiveFewShotEvaluator:
         print("="*60)
         print(f"   • API batch size: {self.batch_size} (concurrent API calls)")
         print(f"   • Save frequency: every {self.save_frequency} examples")
-        print(f"   • Positive examples: {self.num_positive}")
-        print(f"   • Negative examples: {self.num_negative}")
+        
+        # Only show contrastive example counts for contrastive_few_shot
+        if prompt_type == "contrastive_few_shot":
+            print(f"   • Positive examples: {self.num_positive}")
+            print(f"   • Negative examples: {self.num_negative}")
         
         results = []
         responses_file = self.output_dir / "responses" / f"{prompt_type}_responses.jsonl"
@@ -553,11 +535,22 @@ class ContrastiveFewShotEvaluator:
         
         return evaluation
     
-    def run_complete_evaluation(self) -> Dict[str, Any]:
-        """Run the complete contrastive evaluation pipeline."""
+    def run_complete_evaluation(self, evaluate_baseline: bool = False, baseline_only: bool = False) -> Dict[str, Any]:
+        """
+        Run the evaluation pipeline.
+        
+        Args:
+            evaluate_baseline: If True, evaluate original one-shot baseline
+            baseline_only: If True, only evaluate baseline (skip contrastive)
+        """
         
         print("="*80)
-        print("CONTRASTIVE FEW-SHOT EVALUATION PIPELINE")
+        if baseline_only:
+            print("NATIVE BASELINE EVALUATION (Original One-Shot)")
+        elif evaluate_baseline:
+            print("COMPREHENSIVE EVALUATION (Baseline + Contrastive)")
+        else:
+            print("CONTRASTIVE FEW-SHOT EVALUATION PIPELINE")
         print("="*80)
         print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         
@@ -565,54 +558,83 @@ class ContrastiveFewShotEvaluator:
         print("📋 Loading test data...")
         df = self.load_test_data()
         
-        # Load unified prompt
-        print("\n📄 Loading unified prompt...")
-        unified_prompt = self.load_unified_prompt()
+        baseline_eval = None
+        baseline_results = None
+        contrastive_eval = None
+        contrastive_results = None
+        improvement = None
         
-        # Use paper's reported GPT-4 accuracy as baseline
-        print("\n📊 Baseline (from paper):")
-        print("   • GPT-4 One-Shot Accuracy: 50.91%")
-        print("   • Correct: 533/1047")
-        print("   • Source: MedCalc-Bench paper")
+        # Evaluate original one-shot baseline if requested
+        if evaluate_baseline or baseline_only:
+            print("\n" + "="*80)
+            print("EVALUATING: Original One-Shot Baseline")
+            print("="*80)
+            baseline_results = self.generate_and_evaluate(df, "original_one_shot", None)
+            baseline_eval = self.evaluate_results(baseline_results, "original_one_shot")
+            
+            print(f"\n📊 Original One-Shot Baseline Results:")
+            print(f"   • Overall Accuracy: {baseline_eval['overall_accuracy']:.2%}")
+            print(f"   • Correct: {baseline_eval['correct']}/{baseline_eval['total']}")
+        else:
+            # Use paper's reported GPT-4 accuracy as baseline
+            print("\n📊 Baseline (from paper):")
+            print("   • GPT-4 One-Shot Accuracy: 50.91%")
+            print("   • Correct: 533/1047")
+            print("   • Source: MedCalc-Bench paper")
+            
+            baseline_eval = {
+                "prompt_type": "gpt4_one_shot_paper",
+                "overall_accuracy": 0.5091,
+                "total": 1047,
+                "correct": 533,
+                "incorrect": 514,
+                "source": "MedCalc-Bench paper"
+            }
         
-        baseline_eval = {
-            "prompt_type": "gpt4_one_shot_paper",
-            "overall_accuracy": 0.5091,
-            "total": 1047,
-            "correct": 533,
-            "incorrect": 514,
-            "source": "MedCalc-Bench paper"
-        }
-        
-        # Evaluate contrastive few-shot (our refined prompt)
-        print("\n" + "="*80)
-        print("EVALUATING: Contrastive Few-Shot Prompt (Refined)")
-        print("="*80)
-        contrastive_results = self.generate_and_evaluate(df, "contrastive_few_shot", unified_prompt)
-        contrastive_eval = self.evaluate_results(contrastive_results, "contrastive_few_shot")
-        
-        print(f"\n📊 Contrastive Few-Shot Results:")
-        print(f"   • Overall Accuracy: {contrastive_eval['overall_accuracy']:.2%}")
-        print(f"   • Correct: {contrastive_eval['correct']}/{contrastive_eval['total']}")
-        
-        # Calculate improvement over paper baseline
-        improvement = contrastive_eval['overall_accuracy'] - baseline_eval['overall_accuracy']
-        print(f"\n📈 Improvement over paper baseline: {improvement:+.2%}")
+        # Evaluate contrastive few-shot unless baseline-only mode
+        if not baseline_only:
+            # Load unified prompt
+            print("\n📄 Loading unified prompt...")
+            unified_prompt = self.load_unified_prompt()
+            
+            print("\n" + "="*80)
+            print("EVALUATING: Contrastive Few-Shot Prompt (Refined)")
+            print("="*80)
+            contrastive_results = self.generate_and_evaluate(df, "contrastive_few_shot", unified_prompt)
+            contrastive_eval = self.evaluate_results(contrastive_results, "contrastive_few_shot")
+            
+            print(f"\n📊 Contrastive Few-Shot Results:")
+            print(f"   • Overall Accuracy: {contrastive_eval['overall_accuracy']:.2%}")
+            print(f"   • Correct: {contrastive_eval['correct']}/{contrastive_eval['total']}")
+            
+            # Calculate improvement
+            improvement = contrastive_eval['overall_accuracy'] - baseline_eval['overall_accuracy']
+            print(f"\n📈 Improvement over baseline: {improvement:+.2%}")
         
         # Save evaluations
         eval_summary = {
             "timestamp": datetime.now().isoformat(),
             "test_set_size": len(df),
+            "model": self.model,
             "configuration": {
                 "num_positive_examples": self.num_positive,
                 "num_negative_examples": self.num_negative,
                 "api_batch_size": self.batch_size,
-                "save_frequency": self.save_frequency
-            },
-            "baseline_gpt4_paper": baseline_eval,
-            "contrastive_few_shot": contrastive_eval,
-            "improvement": improvement
+                "save_frequency": self.save_frequency,
+                "evaluate_baseline": evaluate_baseline,
+                "baseline_only": baseline_only
+            }
         }
+        
+        if baseline_eval:
+            if baseline_eval.get("source") == "MedCalc-Bench paper":
+                eval_summary["baseline_gpt4_paper"] = baseline_eval
+            else:
+                eval_summary["original_one_shot"] = baseline_eval
+        
+        if contrastive_eval:
+            eval_summary["contrastive_few_shot"] = contrastive_eval
+            eval_summary["improvement"] = improvement
         
         eval_file = self.output_dir / "evaluations" / "evaluation_summary.json"
         with open(eval_file, 'w') as f:
@@ -627,6 +649,7 @@ class ContrastiveFewShotEvaluator:
         
         return {
             "baseline_eval": baseline_eval,
+            "baseline_results": baseline_results,
             "contrastive_results": contrastive_results,
             "contrastive_eval": contrastive_eval,
             "improvement": improvement,
@@ -704,6 +727,18 @@ def main():
         help='OpenAI model to use for evaluation (default: gpt-4o)'
     )
     
+    parser.add_argument(
+        '--evaluate-contrastive-and-baseline',
+        action='store_true',
+        help='Evaluate both original one-shot baseline AND contrastive method'
+    )
+    
+    parser.add_argument(
+        '--baseline-only',
+        action='store_true',
+        help='Only evaluate original one-shot baseline (skip contrastive method)'
+    )
+    
     args = parser.parse_args()
     
     # Get API key
@@ -726,11 +761,15 @@ def main():
         model=args.model
     )
     
-    results = evaluator.run_complete_evaluation()
+    results = evaluator.run_complete_evaluation(
+        evaluate_baseline=args.evaluate_contrastive_and_baseline,
+        baseline_only=args.baseline_only
+    )
     
     print(f"\n✅ Evaluation completed successfully!")
     print(f"📁 Outputs: {results['output_dir']}")
-    print(f"📈 Final improvement: {results['improvement']:+.2%}")
+    if results['improvement'] is not None:
+        print(f"📈 Final improvement: {results['improvement']:+.2%}")
 
 
 if __name__ == "__main__":

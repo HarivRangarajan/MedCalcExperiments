@@ -29,17 +29,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "promptengineer"))
 from promptengineer import PromptPipeline
 from promptengineer.techniques.base import PromptContext
 
-# MedCalc evaluation imports (go up to medcalc-evaluation directory first)
-sys.path.insert(0, str(Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation"))
+# Import shared utilities
+from shared_utils import (
+    load_medcalc_one_shot_examples,
+    extract_answer as extract_answer_util,
+    create_original_one_shot_prompt,
+    evaluate_answer
+)
 
 # Try importing with fallback for OpenAI-only usage
 try:
-    # Suppress torch import warnings for OpenAI-only usage
-    import warnings
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore")
-        from evaluate import check_correctness
-    
     # Custom LLMInference for OpenAI only (avoiding torch dependency)
     LLMInference = None
     try:
@@ -48,8 +47,7 @@ try:
         print("ℹ️  Using OpenAI-only inference (torch not available)")
         
 except ImportError as e:
-    print(f"⚠️  MedCalc evaluation imports failed: {e}")
-    sys.exit(1)
+    print(f"⚠️  LLM inference imports failed: {e}")
 
 
 class MedCalcContrastiveEvaluationPipeline:
@@ -92,10 +90,11 @@ class MedCalcContrastiveEvaluationPipeline:
             # Use custom OpenAI-only wrapper
             self.llm = self._create_openai_wrapper()
         
-        # Load MedCalc one-shot examples
-        self.one_shot_examples = self._load_medcalc_one_shot_examples()
+        # Load MedCalc one-shot examples using shared utility
+        self.one_shot_examples = load_medcalc_one_shot_examples()
         
         print(f"✅ Pipeline initialized with output directory: {self.output_dir}")
+        print(f"   ✓ Loaded {len(self.one_shot_examples)} one-shot examples")
     
     def _create_openai_wrapper(self):
         """Create a simple OpenAI wrapper that mimics LLMInference interface."""
@@ -117,22 +116,6 @@ class MedCalcContrastiveEvaluationPipeline:
                 return ans
         
         return SimpleOpenAIWrapper(self.model, self.api_key)
-    
-    def _load_medcalc_one_shot_examples(self) -> Dict[str, Any]:
-        """Load MedCalc's original one-shot examples for calculator-specific prompting."""
-        try:
-            one_shot_file = Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation" / "one_shot_finalized_explanation.json"
-            if one_shot_file.exists():
-                with open(one_shot_file, 'r') as f:
-                    examples = json.load(f)
-                print(f"✅ Loaded {len(examples)} calculator-specific one-shot examples")
-                return examples
-            else:
-                print(f"⚠️  One-shot examples file not found")
-                return {}
-        except Exception as e:
-            print(f"⚠️  Error loading one-shot examples: {e}")
-            return {}
     
     def load_medcalc_data(self, sample_size: int = None) -> pd.DataFrame:
         """Load and sample MedCalc-Bench train data."""
@@ -307,8 +290,8 @@ class MedCalcContrastiveEvaluationPipeline:
                 try:
                     # Create messages based on prompt type
                     if prompt_type == "original":
-                        # Use original one-shot prompt
-                        system_msg, user_msg = self.extract_original_one_shot_prompt(
+                        # Use original one-shot prompt from shared utility
+                        system_msg, user_msg = create_original_one_shot_prompt(
                             patient_note, question, example["Patient Note"],
                             {"step_by_step_thinking": example["Response"]["step_by_step_thinking"], 
                              "answer": example["Response"]["answer"]}
@@ -333,8 +316,8 @@ class MedCalcContrastiveEvaluationPipeline:
                     # Extract answer and explanation
                     answer_value, explanation = self.extract_answer(answer, int(calculator_id))
                     
-                    # Check correctness
-                    correctness = check_correctness(
+                    # Check correctness using shared utility
+                    correctness = evaluate_answer(
                         answer_value, 
                         row["Ground Truth Answer"], 
                         calculator_id, 
@@ -461,7 +444,8 @@ class MedCalcContrastiveEvaluationPipeline:
         example = self.one_shot_examples.get(first_calculator_id)
         
         if example:
-            system_msg, user_msg = self.extract_original_one_shot_prompt(
+            # Use shared utility for one-shot prompt
+            system_msg, user_msg = create_original_one_shot_prompt(
                 "Sample patient note", "Sample question",
                 example["Patient Note"],
                 {"step_by_step_thinking": example["Response"]["step_by_step_thinking"], 
