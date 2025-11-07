@@ -78,6 +78,9 @@ class PromptRefinementPipeline:
         # Load training examples for evaluation
         self.training_examples = self._load_training_examples()
         
+        # Load MedCalc one-shot examples for proper evaluation
+        self.one_shot_examples = self._load_medcalc_one_shot_examples()
+        
         # Track evaluation progress
         self.evaluation_history = []
         
@@ -87,6 +90,7 @@ class PromptRefinementPipeline:
         print(f"   • Batch size: {self.batch_size}")
         print(f"   • Max iterations: {self.max_iterations or 'unlimited'}")
         print(f"   • Training examples for evaluation: {len(self.training_examples)}")
+        print(f"   • One-shot examples loaded: {len(self.one_shot_examples)}")
     
     def load_results(self, prompt_type: str) -> Tuple[List[Dict], List[Dict]]:
         """Load correct and incorrect responses for a prompt type."""
@@ -159,6 +163,21 @@ class PromptRefinementPipeline:
         print(f"   ✓ Loaded {len(df_filtered)} training examples for evaluation")
         return df_filtered
     
+    def _load_medcalc_one_shot_examples(self) -> Dict[str, Any]:
+        """Load MedCalc's original one-shot examples for calculator-specific prompting."""
+        try:
+            one_shot_file = Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation" / "one_shot_finalized_explanation.json"
+            if one_shot_file.exists():
+                with open(one_shot_file, 'r') as f:
+                    examples = json.load(f)
+                return examples
+            else:
+                print(f"⚠️  One-shot examples file not found")
+                return {}
+        except Exception as e:
+            print(f"⚠️  Error loading one-shot examples: {e}")
+            return {}
+    
     def _extract_answer(self, answer: str, calid: int) -> str:
         """Extract answer from LLM response (same method as other scripts)."""
         extracted_answer = re.findall(r'[Aa]nswer":\s*(.*?)\}', answer)
@@ -176,10 +195,24 @@ class PromptRefinementPipeline:
     async def _evaluate_single_example_async(self, prompt: str, row: pd.Series) -> Dict[str, Any]:
         """Evaluate a single example asynchronously."""
         try:
-            # Create messages
-            user_msg = f"Patient Note:\n{row['Patient Note']}\n\nQuestion: {row['Question']}"
+            # Get calculator-specific one-shot example
+            calculator_id = str(row['Calculator ID'])
+            one_shot_example = self.one_shot_examples.get(calculator_id, {})
+            
+            # Create messages with one-shot example (same format as contrastive generation)
+            if one_shot_example:
+                # Use enhanced prompt + one-shot example (same as contrastive_demonstration_generation.py lines 318-323)
+                system_msg = prompt + f'\n\nHere is an example patient note:\n\n{one_shot_example["Patient Note"]}'
+                system_msg += f'\n\nHere is an example task:\n\n{row["Question"]}'
+                system_msg += f'\n\nHere is the expected output:\n\n{json.dumps({"step_by_step_thinking": one_shot_example["Response"]["step_by_step_thinking"], "answer": one_shot_example["Response"]["answer"]})}'
+                user_msg = f'Here is the patient note:\n\n{row["Patient Note"]}\n\nHere is the task:\n\n{row["Question"]}\n\nPlease directly output the JSON dict.'
+            else:
+                # Fallback if no one-shot example available
+                system_msg = prompt
+                user_msg = f"Patient Note:\n{row['Patient Note']}\n\nQuestion: {row['Question']}"
+            
             messages = [
-                {"role": "system", "content": prompt},
+                {"role": "system", "content": system_msg},
                 {"role": "user", "content": user_msg}
             ]
             

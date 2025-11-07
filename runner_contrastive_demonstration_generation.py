@@ -13,7 +13,7 @@ from pathlib import Path
 # Add the pipeline directory to the path
 sys.path.insert(0, str(Path(__file__).parent / "pipeline"))
 
-from contrastive_demonstration_generation import MedCalcContrastiveEvaluationPipeline
+from pipeline.contrastive_demonstration_generation import MedCalcContrastiveEvaluationPipeline
 
 def main():
     print("🏥 MedCalc-Bench with Contrastive Boosted Edits Evaluation")
