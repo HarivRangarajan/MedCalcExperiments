@@ -200,6 +200,26 @@ python pipeline/prompt_refinement_pipeline.py \
 
 ### Part 3A: Evaluating Baselines
 
+#### Option 1: Native Baseline Evaluation (Original One-Shot)
+
+Evaluates MedCalc's original one-shot prompt with any OpenAI model:
+
+```bash
+# Run with GPT-4o
+./run_native_baseline_model.sh --model gpt-4o
+
+# Run with GPT-5
+./run_native_baseline_model.sh --model gpt-5
+
+# Run on specific number of examples
+./run_native_baseline_model.sh --model gpt-4o --num-examples 100
+```
+
+**What it evaluates**:
+- Original MedCalc one-shot prompt only
+
+#### Option 2: Comprehensive Baseline Evaluation
+
 Evaluates original MedCalc-Bench prompts and PromptEngineer techniques.
 
 ```bash

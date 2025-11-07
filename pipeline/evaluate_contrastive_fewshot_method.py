@@ -612,18 +612,23 @@ class ContrastiveFewShotEvaluator:
             print(f"\n📈 Improvement over baseline: {improvement:+.2%}")
         
         # Save evaluations
+        config = {
+            "api_batch_size": self.batch_size,
+            "save_frequency": self.save_frequency,
+            "evaluate_baseline": evaluate_baseline,
+            "baseline_only": baseline_only
+        }
+        
+        # Only include contrastive example counts if actually using them
+        if not baseline_only:
+            config["num_positive_examples"] = self.num_positive
+            config["num_negative_examples"] = self.num_negative
+        
         eval_summary = {
             "timestamp": datetime.now().isoformat(),
             "test_set_size": len(df),
             "model": self.model,
-            "configuration": {
-                "num_positive_examples": self.num_positive,
-                "num_negative_examples": self.num_negative,
-                "api_batch_size": self.batch_size,
-                "save_frequency": self.save_frequency,
-                "evaluate_baseline": evaluate_baseline,
-                "baseline_only": baseline_only
-            }
+            "configuration": config
         }
         
         if baseline_eval:
