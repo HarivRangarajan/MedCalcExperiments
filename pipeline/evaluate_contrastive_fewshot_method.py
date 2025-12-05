@@ -437,8 +437,8 @@ class ContrastiveFewShotEvaluator:
         
         # Only show contrastive example counts for contrastive_few_shot
         if prompt_type == "contrastive_few_shot":
-            print(f"   • Positive examples: {self.num_positive}")
-            print(f"   • Negative examples: {self.num_negative}")
+        print(f"   • Positive examples: {self.num_positive}")
+        print(f"   • Negative examples: {self.num_negative}")
         
         results = []
         responses_file = self.output_dir / "responses" / f"{prompt_type}_responses.jsonl"
@@ -550,7 +550,7 @@ class ContrastiveFewShotEvaluator:
         elif evaluate_baseline:
             print("COMPREHENSIVE EVALUATION (Baseline + Contrastive)")
         else:
-            print("CONTRASTIVE FEW-SHOT EVALUATION PIPELINE")
+        print("CONTRASTIVE FEW-SHOT EVALUATION PIPELINE")
         print("="*80)
         print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         
@@ -576,20 +576,20 @@ class ContrastiveFewShotEvaluator:
             print(f"   • Overall Accuracy: {baseline_eval['overall_accuracy']:.2%}")
             print(f"   • Correct: {baseline_eval['correct']}/{baseline_eval['total']}")
         else:
-            # Use paper's reported GPT-4 accuracy as baseline
-            print("\n📊 Baseline (from paper):")
-            print("   • GPT-4 One-Shot Accuracy: 50.91%")
-            print("   • Correct: 533/1047")
-            print("   • Source: MedCalc-Bench paper")
-            
-            baseline_eval = {
-                "prompt_type": "gpt4_one_shot_paper",
-                "overall_accuracy": 0.5091,
-                "total": 1047,
-                "correct": 533,
-                "incorrect": 514,
-                "source": "MedCalc-Bench paper"
-            }
+        # Use paper's reported GPT-4 accuracy as baseline
+        print("\n📊 Baseline (from paper):")
+        print("   • GPT-4 One-Shot Accuracy: 50.91%")
+        print("   • Correct: 533/1047")
+        print("   • Source: MedCalc-Bench paper")
+        
+        baseline_eval = {
+            "prompt_type": "gpt4_one_shot_paper",
+            "overall_accuracy": 0.5091,
+            "total": 1047,
+            "correct": 533,
+            "incorrect": 514,
+            "source": "MedCalc-Bench paper"
+        }
         
         # Evaluate contrastive few-shot unless baseline-only mode
         if not baseline_only:
@@ -597,18 +597,18 @@ class ContrastiveFewShotEvaluator:
             print("\n📄 Loading unified prompt...")
             unified_prompt = self.load_unified_prompt()
             
-            print("\n" + "="*80)
-            print("EVALUATING: Contrastive Few-Shot Prompt (Refined)")
-            print("="*80)
-            contrastive_results = self.generate_and_evaluate(df, "contrastive_few_shot", unified_prompt)
-            contrastive_eval = self.evaluate_results(contrastive_results, "contrastive_few_shot")
-            
-            print(f"\n📊 Contrastive Few-Shot Results:")
-            print(f"   • Overall Accuracy: {contrastive_eval['overall_accuracy']:.2%}")
-            print(f"   • Correct: {contrastive_eval['correct']}/{contrastive_eval['total']}")
-            
+        print("\n" + "="*80)
+        print("EVALUATING: Contrastive Few-Shot Prompt (Refined)")
+        print("="*80)
+        contrastive_results = self.generate_and_evaluate(df, "contrastive_few_shot", unified_prompt)
+        contrastive_eval = self.evaluate_results(contrastive_results, "contrastive_few_shot")
+        
+        print(f"\n📊 Contrastive Few-Shot Results:")
+        print(f"   • Overall Accuracy: {contrastive_eval['overall_accuracy']:.2%}")
+        print(f"   • Correct: {contrastive_eval['correct']}/{contrastive_eval['total']}")
+        
             # Calculate improvement
-            improvement = contrastive_eval['overall_accuracy'] - baseline_eval['overall_accuracy']
+        improvement = contrastive_eval['overall_accuracy'] - baseline_eval['overall_accuracy']
             print(f"\n📈 Improvement over baseline: {improvement:+.2%}")
         
         # Save evaluations
@@ -774,7 +774,7 @@ def main():
     print(f"\n✅ Evaluation completed successfully!")
     print(f"📁 Outputs: {results['output_dir']}")
     if results['improvement'] is not None:
-        print(f"📈 Final improvement: {results['improvement']:+.2%}")
+    print(f"📈 Final improvement: {results['improvement']:+.2%}")
 
 
 if __name__ == "__main__":
