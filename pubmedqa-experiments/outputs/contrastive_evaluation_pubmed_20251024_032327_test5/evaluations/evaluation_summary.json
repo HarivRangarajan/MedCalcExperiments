@@ -1,0 +1,47 @@
+{
+  "timestamp": "2025-10-24T03:23:37.647201",
+  "test_set_size": 5,
+  "configuration": {
+    "num_positive_examples": 2,
+    "num_negative_examples": 2,
+    "api_batch_size": 2,
+    "save_frequency": 50,
+    "unified_prompt_source": "/Users/sadrishya/Acads/IS/outputs/refined_prompts_pubmed_20251024_014245/final/unified_prompt.txt"
+  },
+  "contrastive_few_shot": {
+    "prompt_type": "contrastive_few_shot",
+    "overall_accuracy": 0.8,
+    "total": 5,
+    "correct": 4,
+    "incorrect": 1,
+    "by_answer_type": {
+      "yes": {
+        "total": 5,
+        "correct": 4,
+        "accuracy": 0.8
+      }
+    },
+    "by_year": {
+      "2002": {
+        "total": 1,
+        "correct": 1,
+        "accuracy": 1.0
+      },
+      "2015": {
+        "total": 1,
+        "correct": 1,
+        "accuracy": 1.0
+      },
+      "2008": {
+        "total": 2,
+        "correct": 1,
+        "accuracy": 0.5
+      },
+      "2003": {
+        "total": 1,
+        "correct": 1,
+        "accuracy": 1.0
+      }
+    }
+  }
+}

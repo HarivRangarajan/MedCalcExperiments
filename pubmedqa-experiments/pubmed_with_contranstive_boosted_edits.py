@@ -34,7 +34,7 @@ class PubMedContrastiveEvaluationPipeline:
     """Complete evaluation pipeline for PubMed PQAL with prompt engineering comparison."""
     
     # Configuration constants
-    DEFAULT_SAMPLE_SIZE = 10  # Default number of examples to sample from dataset
+    DEFAULT_SAMPLE_SIZE = 500  # Default number of examples to sample from dataset
     DEFAULT_MODEL = "OpenAI/gpt-4o"  # Default model for evaluations
     
     def __init__(self, api_key: str, output_dir: str = None, 
@@ -354,11 +354,6 @@ Here are some examples:'''
         
         return enhanced_prompts
     
-    def save_outputs_as_json(self, data_list, output_file):
-        """Save outputs as single JSON file containing a list of entries."""
-        with open(output_file, 'w') as f:
-            json.dump(data_list, f, indent=2, ensure_ascii=False)
-
     def generate_responses(self, df: pd.DataFrame, enhanced_prompts: Dict[str, Any]) -> Dict[str, List[Dict]]:
         """
         Generate responses for all prompt types (original + enhanced).
@@ -458,10 +453,10 @@ Here are some examples:'''
                     all_responses[prompt_type].append(result)
             
             # Save responses for this prompt type
-            for prompt_type, responses in all_responses.items():
-                output_file = self.output_dir / "responses" / f"{prompt_type}_responses.json"
-                self.save_outputs_as_json(responses, output_file)
-                print(f"Saved {len(responses)} responses to {output_file}")
+            responses_file = self.output_dir / "responses" / f"{prompt_type}_responses.jsonl"
+            with open(responses_file, 'w') as f:
+                for result in all_responses[prompt_type]:
+                    f.write(json.dumps(result) + "\n")
         
         return all_responses
     
@@ -500,9 +495,6 @@ Here are some examples:'''
         
         evaluation_results = {}
         
-        contrastive_dir = Path(__file__).parent / "data" / "contrastive"
-        contrastive_dir.mkdir(parents=True, exist_ok=True)
-
         for prompt_type, responses in all_responses.items():
             print(f"\n   Evaluating: {prompt_type}")
             
@@ -518,12 +510,16 @@ Here are some examples:'''
             incorrect_responses = [r for r in responses if r["Result"] == "Incorrect"]
             
             # Save correct responses
-            correct_file = Path(__file__).parent / "data" / "contrastive" / f"{prompt_type}_correct.json"
-            self.save_outputs_as_json(correct_responses, correct_file)
+            correct_file = self.output_dir / "correct" / f"{prompt_type}_correct.jsonl"
+            with open(correct_file, 'w') as f:
+                for result in correct_responses:
+                    f.write(json.dumps(result) + "\n")
             
             # Save incorrect responses
-            incorrect_file = Path(__file__).parent / "data" / "contrastive" / f"{prompt_type}_incorrect.json"
-            self.save_outputs_as_json(incorrect_responses, incorrect_file)
+            incorrect_file = self.output_dir / "incorrect" / f"{prompt_type}_incorrect.jsonl"
+            with open(incorrect_file, 'w') as f:
+                for result in incorrect_responses:
+                    f.write(json.dumps(result) + "\n")
             
             print(f"      Saved {len(correct_responses)} correct responses to: {correct_file.name}")
             print(f"      Saved {len(incorrect_responses)} incorrect responses to: {incorrect_file.name}")

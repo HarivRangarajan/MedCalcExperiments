@@ -1,0 +1,90 @@
+{
+  "overall_results": {
+    "original": {
+      "accuracy": 0.7570281124497992,
+      "total": 498,
+      "correct": 377,
+      "incorrect": 121
+    },
+    "chain_of_thought": {
+      "accuracy": 0.7871485943775101,
+      "total": 498,
+      "correct": 392,
+      "incorrect": 106
+    },
+    "chain_of_draft": {
+      "accuracy": 0.7670682730923695,
+      "total": 498,
+      "correct": 382,
+      "incorrect": 116
+    }
+  },
+  "category_analysis": {
+    "original": {
+      "statement_truthiness": {
+        "total": 311,
+        "correct": 234,
+        "accuracy": 0.752411575562701
+      },
+      "association_relatedness": {
+        "total": 70,
+        "correct": 53,
+        "accuracy": 0.7571428571428571
+      },
+      "therapy_evaluation": {
+        "total": 69,
+        "correct": 53,
+        "accuracy": 0.7681159420289855
+      },
+      "factor_influence": {
+        "total": 48,
+        "correct": 37,
+        "accuracy": 0.7708333333333334
+      }
+    },
+    "chain_of_thought": {
+      "statement_truthiness": {
+        "total": 311,
+        "correct": 246,
+        "accuracy": 0.7909967845659164
+      },
+      "association_relatedness": {
+        "total": 70,
+        "correct": 53,
+        "accuracy": 0.7571428571428571
+      },
+      "therapy_evaluation": {
+        "total": 69,
+        "correct": 54,
+        "accuracy": 0.782608695652174
+      },
+      "factor_influence": {
+        "total": 48,
+        "correct": 39,
+        "accuracy": 0.8125
+      }
+    },
+    "chain_of_draft": {
+      "statement_truthiness": {
+        "total": 311,
+        "correct": 234,
+        "accuracy": 0.752411575562701
+      },
+      "association_relatedness": {
+        "total": 70,
+        "correct": 55,
+        "accuracy": 0.7857142857142857
+      },
+      "therapy_evaluation": {
+        "total": 69,
+        "correct": 54,
+        "accuracy": 0.782608695652174
+      },
+      "factor_influence": {
+        "total": 48,
+        "correct": 39,
+        "accuracy": 0.8125
+      }
+    }
+  }
+}

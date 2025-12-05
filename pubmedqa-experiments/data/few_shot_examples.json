@@ -1,0 +1,115 @@
+{
+    "11799314": {
+        "PMID": "11799314",
+        "QUESTION": "Is external palliative radiotherapy for gallbladder carcinoma effective?",
+        "CONTEXTS": "Gallbladder carcinoma is characterized by delayed diagnosis, ineffective treatment and poor prognosis. Surgical resection has been thought to be the treatment of choice, while the role of radiotherapy as adjuvant or palliative treatment has not been fully clarified in the literature. We present the case of a 45-year-old female, with unresectable gallbladder carcinoma, grade IV, histologically diagnosed during laparotomy. The patient was treated with palliative intent with percutaneous transhepatic biliary drainage. Furthermore, she received external radiotherapy by (60)Co, using a three-field technique (anterior-posterior and right lateral). The total dose was 3,000 cGy in 10 fractions, with 300 cGy per fraction, 5 days weekly. The patient showed clinico-laboratory improvement and was discharged with a permanent percutaneous transhepatic endoprosthesis. During follow-up (10 and 12 months postirradiation), abdominal CTs showed no local extension of the tumor, while the patient had a good performance status. So far, 1 year after the diagnosis of gallbladder cancer she is still alive.",
+        "LONG_ANSWER": "External radiotherapy seems to be a safe and effective method of palliative management of gallbladder carcinoma. However, further studies are necessary to determine the role of radiotherapy in palliative or adjuvant treatment of gallbladder carcinoma.",
+        "FINAL_DECISION": "yes",
+        "CATEGORY": "therapy_evaluation",
+        "LABELS": [
+            "BACKGROUND",
+            "PATIENT AND METHODS",
+            "RESULTS"
+        ],
+        "MESHES": [
+            "Cobalt Radioisotopes",
+            "Female",
+            "Follow-Up Studies",
+            "Gallbladder Neoplasms",
+            "Humans",
+            "Middle Aged",
+            "Neoplasm Staging",
+            "Palliative Care",
+            "Radioisotope Teletherapy",
+            "Radiotherapy Planning, Computer-Assisted",
+            "Tomography, X-Ray Computed"
+        ],
+        "YEAR": "2001"
+    },
+    "14612308": {
+        "PMID": "14612308",
+        "QUESTION": "Can PRISM predict length of PICU stay?",
+        "CONTEXTS": "PRISM is claimed to score disease severity which has attributed an impact on length of PICU stay (LOS). To determine the impact of PRISM on LOS, and evaluate an Artificial Neural Network's (ANN) performance to estimate LOS from PRISM item patterns. Retrospectively we performed correlation and regression analyses on routinely scored PRISM data of all consecutive admissions to our level-III PICU from 1994 to 1999 (n>2000) with individual LOS. In addition, an ANN was trained on the chronologically first 75% of those data (inputs, PRISM items + age + sex; output, LOS). The ANN's performance was tested on the remaining most recent 25% of the data sets. The Spearman and Pearson coefficients of correlation between PRISM and LOS were 0.2 (p<0.001) and 0.08 (p = 0.0003), the latter being slightly higher when LOS was logarithmically transformed. Pearson's coefficient of correlation between ANN derived LOS estimate and actual LOS was 0.21 (p<0.001) (LOS logarithmically transformed: 0.34; p<0.001) in the independent validation sample.",
+        "LONG_ANSWER": "The ANN with its intrinsic ability to detect non-linear correlation, and to relate specific item patterns to LOS, outperformed linear statistics but was still disappointing in estimating individual LOS. It might be speculated that therapeutic intervention modulates the natural course of the disease thus counteracting both disease severity as initially scored by PRISM, and LOS. This being true, the inverse of the correlation between PRISM (or PRISM based LOS estimate) and LOS might be a candidate indicator of quality of care.",
+        "FINAL_DECISION": "no",
+        "CATEGORY": "association_relatedness",
+        "LABELS": [
+            "UNLABELLED",
+            "PRIMARY OBJECTIVE",
+            "RESEARCH DESIGN AND METHODS",
+            "MAIN RESULTS"
+        ],
+        "MESHES": [
+            "Cohort Studies",
+            "Health Services Research",
+            "Humans",
+            "Intensive Care Units, Pediatric",
+            "Length of Stay",
+            "Netherlands",
+            "Neural Networks (Computer)",
+            "Patient Readmission",
+            "Probability",
+            "Retrospective Studies",
+            "Severity of Illness Index"
+        ],
+        "YEAR": "2003"
+    },
+    "15489384": {
+        "PMID": "15489384",
+        "QUESTION": "Does reducing spasticity translate into functional benefit?",
+        "CONTEXTS": "Spasticity and loss of function in an affected arm are common after stroke. Although botulinum toxin is used to reduce spasticity, its functional benefits are less easily demonstrated. This paper reports an exploratory meta-analysis to investigate the relationship between reduced arm spasticity and improved arm function. Individual data from stroke patients in two randomised controlled trials of intra-muscular botulinum toxin were pooled. The Modified Ashworth Scale (elbow, wrist, fingers) was used to calculate a \"Composite Spasticity Index\". Data from the arm section of the Barthel Activities of Daily Living Index (dressing, grooming, and feeding) and three subjective measures (putting arm through sleeve, cleaning palm, cutting fingernails) were summed to give a \"Composite Functional Index\". Change scores and the time of maximum change were also calculated. Maximum changes in both composite measures occurred concurrently in 47 patients. In 26 patients the improvement in spasticity preceded the improvement in function with 18 showing the reverse. There was a definite relationship between the maximum change in spasticity and the maximum change in arm function, independent of treatment (rho = -0.2822, p = 0.0008, n = 137). There was a clear relationship between the changes in spasticity and in arm function in patients treated with botulinum toxin (Dysport) at 500 or 1000 units (rho = -0.5679, p = 0.0090, n = 22; rho = -0.4430, p = 0.0018, n = 47), but not in those treated with placebo or 1500 units.",
+        "LONG_ANSWER": "Using a targeted meta-analytic approach, it is possible to demonstrate that reducing spasticity in the arm is associated with a significant improvement in arm function.",
+        "FINAL_DECISION": "yes",
+        "CATEGORY": "statement_truthiness",
+        "LABELS": [
+            "BACKGROUND",
+            "METHOD",
+            "RESULTS"
+        ],
+        "MESHES": [
+            "Activities of Daily Living",
+            "Aged",
+            "Arm",
+            "Botulinum Toxins, Type A",
+            "Double-Blind Method",
+            "Female",
+            "Humans",
+            "Injections, Intramuscular",
+            "Male",
+            "Middle Aged",
+            "Motor Activity",
+            "Muscle Spasticity",
+            "Neuromuscular Agents",
+            "Randomized Controlled Trials as Topic",
+            "Stroke",
+            "Stroke Rehabilitation"
+        ],
+        "YEAR": "2004"
+    },
+    "25277731": {
+        "PMID": "25277731",
+        "QUESTION": "Sternal fracture in growing children : A rare and often overlooked fracture?",
+        "CONTEXTS": "Sternal fractures in childhood are rare. The aim of the study was to investigate the accident mechanism, the detection of radiological and sonographical criteria and consideration of associated injuries. In the period from January 2010 to December 2012 all inpatients and outpatients with sternal fractures were recorded according to the documentation. A total of 4 children aged 5-14 years with a sternal fracture were treated in 2 years, 2 children were hospitalized for pain management and 2 remained in outpatient care.",
+        "LONG_ANSWER": "Isolated sternal fractures in childhood are often due to typical age-related traumatic incidents. Ultrasonography is a useful diagnostic tool for fracture detection and radiography is the method of choice for visualization of the extent of the dislocation.",
+        "FINAL_DECISION": "maybe",
+        "CATEGORY": "statement_truthiness",
+        "LABELS": [
+            "BACKGROUND",
+            "METHOD",
+            "RESULTS"
+        ],
+        "MESHES": [
+            "Adolescent",
+            "Chest Pain",
+            "Child",
+            "Child, Preschool",
+            "Diagnosis, Differential",
+            "Fractures, Bone",
+            "Humans",
+            "Male",
+            "Rare Diseases",
+            "Sternum"
+        ],
+        "YEAR": "2016"
+    }
+}

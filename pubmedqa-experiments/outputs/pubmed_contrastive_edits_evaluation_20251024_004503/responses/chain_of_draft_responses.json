@@ -1,0 +1,74 @@
+[
+  {
+    "PMID": "18800356",
+    "Category": "statement_truthiness",
+    "Question": "The FOOTSTEP self-management foot care programme: are rheumatoid arthritis patients physically able to participate?",
+    "Context": "The FOOTSTEP self-management foot care programme is a clinical and cost-effective programme for basic foot care in the elderly. The aim of this study was to determine if patients with rheumatoid arthritis (RA) would be physically able to participate. A consecutive cohort of RA patients undergoing podiatry care underwent tests for sight, reach and grip strength to determine their physical ability to undertake self-managed foot care. Thirty RA patients (10 male, 20 female), with a median age of 61 years (range 42 to 84) and disease duration of 10 years (range one to 40), were recruited. All patients passed the sight test, whereas the reach and grip tests were passed by 77% and 67% of patients, respectively. Only 57% of patients passed all the physical tests. Patients who failed the physical tests were older, and had longer disease duration and higher physical disability, pain and general health scores but these were not statistically different.",
+    "LLM_Answer": "57% of RA patients passed all tests, indicating partial feasibility.",
+    "LLM_Reasoning": "Step 1: Identify physical tests, Step 2: Assess test results, Step 3: Calculate pass percentage",
+    "LLM_Decision": "maybe",
+    "Ground_Truth_Decision": "maybe",
+    "Ground_Truth_Answer": "Just over half the patients in this present cohort may be physically able to undertake some aspects of self-managed foot care, including nail clipping and filing, callus filing and daily hygiene and inspection.",
+    "Result": "Correct",
+    "Prompt_Type": "chain_of_draft",
+    "Year": "2009",
+    "Labels": [
+      "BACKGROUND",
+      "METHODS",
+      "RESULTS"
+    ],
+    "Meshes": [
+      "Activities of Daily Living",
+      "Adult",
+      "Aged",
+      "Aged, 80 and over",
+      "Arthritis, Rheumatoid",
+      "Disability Evaluation",
+      "Female",
+      "Foot Diseases",
+      "Humans",
+      "Hygiene",
+      "Male",
+      "Middle Aged",
+      "Patient Participation",
+      "Podiatry",
+      "Program Evaluation",
+      "Self Care"
+    ]
+  },
+  {
+    "PMID": "24074624",
+    "Category": "statement_truthiness",
+    "Question": "Is intensive monitoring during the first transfusion in pediatric patients necessary?",
+    "Context": "Some pediatric patients, typically those that are very young or felt to be especially sick are temporarily admitted to the intensive care unit (ICU) for observation during their first transfusion. If a significant reaction that requires ICU management does not occur, these patients are then transferred to a regular ward where future blood products are administered. The aim of this project was to determine if heightened observation such as temporary ICU admissions for the first transfusion are warranted. From the blood bank records of a tertiary care pediatric hospital, a list of patients on whom a transfusion reaction was reported between 2007 and 2012, the type of reaction and the patient's transfusion history, were extracted. The hospital location where the transfusion occurred, and whether the patient was evaluated by the ICU team or transferred to the ICU for management of the reaction was determined from the patient's electronic medical record. There were 174 acute reactions in 150 patients. Of these 150 patients, 13 (8.7%) different patients experienced a reaction during their first transfusion; all 13 patients experienced clinically mild reactions (8 febrile non-hemolytic, 4 mild allergic, and 1 patient who simultaneously had a mild allergic and a febrile non-hemolytic), and none required ICU management. Six severe reactions (6 of 174, 3.4%) involving significant hypotension and/or hypoxia that required acute and intensive management occurred during subsequent (i.e. not the first) transfusion in six patients.",
+    "LLM_Answer": "First transfusions mild, no ICU required. Severe reactions occur later.",
+    "LLM_Reasoning": "Step 1: Assess first transfusion reactions, Step 2: Acknowledge reaction severity, Step 3: ICU management necessity, Step 4: Analyze severe reactions timing, Step 5: Conclude on monitoring necessity",
+    "LLM_Decision": "no",
+    "Ground_Truth_Decision": "no",
+    "Ground_Truth_Answer": "The practice of intensive observation for the first transfusion in pediatric patients is probably unnecessary.",
+    "Result": "Correct",
+    "Prompt_Type": "chain_of_draft",
+    "Year": "2014",
+    "Labels": [
+      "BACKGROUND",
+      "METHODS",
+      "RESULTS"
+    ],
+    "Meshes": [
+      "Adolescent",
+      "Adult",
+      "Blood Component Transfusion",
+      "Blood Transfusion",
+      "Child",
+      "Child, Preschool",
+      "Critical Care",
+      "Humans",
+      "Infant",
+      "Infant, Newborn",
+      "Intensive Care Units",
+      "Population Surveillance",
+      "Transfusion Reaction",
+      "Young Adult"
+    ]
+  }
+]

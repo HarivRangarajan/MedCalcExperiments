@@ -1,0 +1,60 @@
+{
+  "overall_results": {
+    "original": {
+      "accuracy": 0.7,
+      "total": 10,
+      "correct": 7,
+      "incorrect": 3
+    },
+    "chain_of_thought": {
+      "accuracy": 0.8,
+      "total": 10,
+      "correct": 8,
+      "incorrect": 2
+    },
+    "chain_of_draft": {
+      "accuracy": 0.7,
+      "total": 10,
+      "correct": 7,
+      "incorrect": 3
+    }
+  },
+  "category_analysis": {
+    "original": {
+      "statement_truthiness": {
+        "total": 9,
+        "correct": 7,
+        "accuracy": 0.7777777777777778
+      },
+      "association_relatedness": {
+        "total": 1,
+        "correct": 0,
+        "accuracy": 0.0
+      }
+    },
+    "chain_of_thought": {
+      "statement_truthiness": {
+        "total": 9,
+        "correct": 8,
+        "accuracy": 0.8888888888888888
+      },
+      "association_relatedness": {
+        "total": 1,
+        "correct": 0,
+        "accuracy": 0.0
+      }
+    },
+    "chain_of_draft": {
+      "statement_truthiness": {
+        "total": 9,
+        "correct": 7,
+        "accuracy": 0.7777777777777778
+      },
+      "association_relatedness": {
+        "total": 1,
+        "correct": 0,
+        "accuracy": 0.0
+      }
+    }
+  }
+}

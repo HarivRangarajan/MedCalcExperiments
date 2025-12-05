@@ -1,0 +1,24 @@
+{
+  "pmid_uniqueness": true,
+  "category_distribution": {
+    "train": {
+      "factor_influence": 48,
+      "statement_truthiness": 311,
+      "therapy_evaluation": 70,
+      "association_relatedness": 71
+    },
+    "test": {
+      "factor_influence": 47,
+      "statement_truthiness": 321,
+      "therapy_evaluation": 55,
+      "association_relatedness": 77
+    },
+    "combined": {
+      "factor_influence": 95,
+      "statement_truthiness": 632,
+      "therapy_evaluation": 125,
+      "association_relatedness": 148
+    }
+  },
+  "validation_timestamp": "1761265803.2751496"
+}

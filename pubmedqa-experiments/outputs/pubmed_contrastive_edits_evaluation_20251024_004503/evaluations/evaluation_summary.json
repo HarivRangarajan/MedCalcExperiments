@@ -1,0 +1,45 @@
+{
+  "overall_results": {
+    "original": {
+      "accuracy": 1.0,
+      "total": 2,
+      "correct": 2,
+      "incorrect": 0
+    },
+    "chain_of_thought": {
+      "accuracy": 1.0,
+      "total": 2,
+      "correct": 2,
+      "incorrect": 0
+    },
+    "chain_of_draft": {
+      "accuracy": 1.0,
+      "total": 2,
+      "correct": 2,
+      "incorrect": 0
+    }
+  },
+  "category_analysis": {
+    "original": {
+      "statement_truthiness": {
+        "total": 2,
+        "correct": 2,
+        "accuracy": 1.0
+      }
+    },
+    "chain_of_thought": {
+      "statement_truthiness": {
+        "total": 2,
+        "correct": 2,
+        "accuracy": 1.0
+      }
+    },
+    "chain_of_draft": {
+      "statement_truthiness": {
+        "total": 2,
+        "correct": 2,
+        "accuracy": 1.0
+      }
+    }
+  }
+}

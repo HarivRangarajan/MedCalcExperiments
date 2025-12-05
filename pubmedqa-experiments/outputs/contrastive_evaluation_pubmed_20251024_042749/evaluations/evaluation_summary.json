@@ -1,0 +1,162 @@
+{
+  "timestamp": "2025-10-24T04:37:52.335446",
+  "test_set_size": 498,
+  "configuration": {
+    "num_positive_examples": 2,
+    "num_negative_examples": 2,
+    "api_batch_size": 10,
+    "save_frequency": 50,
+    "unified_prompt_source": "/Users/sadrishya/Acads/IS/outputs/refined_prompts_pubmed_20251024_035950/final/unified_prompt.txt"
+  },
+  "contrastive_few_shot": {
+    "prompt_type": "contrastive_few_shot",
+    "overall_accuracy": 0.7188755020080321,
+    "total": 498,
+    "correct": 358,
+    "incorrect": 140,
+    "by_answer_type": {
+      "yes": {
+        "total": 275,
+        "correct": 217,
+        "accuracy": 0.7890909090909091
+      },
+      "no": {
+        "total": 169,
+        "correct": 125,
+        "accuracy": 0.7396449704142012
+      },
+      "maybe": {
+        "total": 54,
+        "correct": 16,
+        "accuracy": 0.2962962962962963
+      }
+    },
+    "by_year": {
+      "2002": {
+        "total": 24,
+        "correct": 21,
+        "accuracy": 0.875
+      },
+      "2015": {
+        "total": 35,
+        "correct": 25,
+        "accuracy": 0.7142857142857143
+      },
+      "2008": {
+        "total": 35,
+        "correct": 25,
+        "accuracy": 0.7142857142857143
+      },
+      "2003": {
+        "total": 15,
+        "correct": 9,
+        "accuracy": 0.6
+      },
+      "2009": {
+        "total": 27,
+        "correct": 20,
+        "accuracy": 0.7407407407407407
+      },
+      "null": {
+        "total": 22,
+        "correct": 13,
+        "accuracy": 0.5909090909090909
+      },
+      "2014": {
+        "total": 35,
+        "correct": 25,
+        "accuracy": 0.7142857142857143
+      },
+      "1994": {
+        "total": 3,
+        "correct": 1,
+        "accuracy": 0.3333333333333333
+      },
+      "2012": {
+        "total": 39,
+        "correct": 27,
+        "accuracy": 0.6923076923076923
+      },
+      "2013": {
+        "total": 42,
+        "correct": 35,
+        "accuracy": 0.8333333333333334
+      },
+      "2010": {
+        "total": 21,
+        "correct": 15,
+        "accuracy": 0.7142857142857143
+      },
+      "2011": {
+        "total": 27,
+        "correct": 23,
+        "accuracy": 0.8518518518518519
+      },
+      "2016": {
+        "total": 36,
+        "correct": 22,
+        "accuracy": 0.6111111111111112
+      },
+      "2004": {
+        "total": 19,
+        "correct": 17,
+        "accuracy": 0.8947368421052632
+      },
+      "2001": {
+        "total": 10,
+        "correct": 5,
+        "accuracy": 0.5
+      },
+      "1997": {
+        "total": 7,
+        "correct": 3,
+        "accuracy": 0.42857142857142855
+      },
+      "2005": {
+        "total": 11,
+        "correct": 10,
+        "accuracy": 0.9090909090909091
+      },
+      "2000": {
+        "total": 10,
+        "correct": 8,
+        "accuracy": 0.8
+      },
+      "2007": {
+        "total": 19,
+        "correct": 13,
+        "accuracy": 0.6842105263157895
+      },
+      "1996": {
+        "total": 5,
+        "correct": 2,
+        "accuracy": 0.4
+      },
+      "1998": {
+        "total": 7,
+        "correct": 5,
+        "accuracy": 0.7142857142857143
+      },
+      "2017": {
+        "total": 13,
+        "correct": 11,
+        "accuracy": 0.8461538461538461
+      },
+      "1999": {
+        "total": 9,
+        "correct": 7,
+        "accuracy": 0.7777777777777778
+      },
+      "2006": {
+        "total": 20,
+        "correct": 14,
+        "accuracy": 0.7
+      },
+      "1995": {
+        "total": 7,
+        "correct": 2,
+        "accuracy": 0.2857142857142857
+      }
+    }
+  }
+}
