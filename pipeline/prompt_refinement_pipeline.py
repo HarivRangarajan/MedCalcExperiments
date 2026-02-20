@@ -461,12 +461,17 @@ Provide ONLY the refined prompt text. Do not include explanations or meta-commen
             response = self.client.chat.completions.create(**api_params)
             
             refined_prompt = response.choices[0].message.content.strip()
-            
-            # Remove markdown code blocks if present
-            if refined_prompt.startswith("```"):
-                lines = refined_prompt.split('\n')
-                refined_prompt = '\n'.join(lines[1:-1]) if len(lines) > 2 else refined_prompt
-            
+
+            # Remove markdown code blocks if present (handles ```text, ```markdown, etc.)
+            import re as _re
+            refined_prompt = _re.sub(r'^```[\w]*\n?', '', refined_prompt)
+            refined_prompt = _re.sub(r'\n?```$', '', refined_prompt)
+            refined_prompt = refined_prompt.strip()
+
+            if not refined_prompt:
+                print(f"   ⚠️  Refined prompt was empty after stripping, keeping current prompt")
+                return current_prompt
+
             return refined_prompt
             
         except Exception as e:
@@ -635,12 +640,13 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
             response = self.client.chat.completions.create(**api_params)
             
             unified_prompt = response.choices[0].message.content.strip()
-            
+
             # Remove markdown code blocks if present
-            if unified_prompt.startswith("```"):
-                lines = unified_prompt.split('\n')
-                unified_prompt = '\n'.join(lines[1:-1]) if len(lines) > 2 else unified_prompt
-            
+            import re as _re
+            unified_prompt = _re.sub(r'^```[\w]*\n?', '', unified_prompt)
+            unified_prompt = _re.sub(r'\n?```$', '', unified_prompt)
+            unified_prompt = unified_prompt.strip()
+
             print(f"   ✅ Unified prompt created ({len(unified_prompt)} characters)")
             
             return unified_prompt
@@ -757,12 +763,13 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
             response = self.client.chat.completions.create(**api_params)
             
             unified_prompt = response.choices[0].message.content.strip()
-            
+
             # Remove markdown code blocks if present
-            if unified_prompt.startswith("```"):
-                lines = unified_prompt.split('\n')
-                unified_prompt = '\n'.join(lines[1:-1]) if len(lines) > 2 else unified_prompt
-            
+            import re as _re
+            unified_prompt = _re.sub(r'^```[\w]*\n?', '', unified_prompt)
+            unified_prompt = _re.sub(r'\n?```$', '', unified_prompt)
+            unified_prompt = unified_prompt.strip()
+
             print(f"   ✓ Initial unified prompt created ({len(unified_prompt)} characters)")
             
             return unified_prompt
@@ -834,11 +841,19 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
             all_incorrect
         )
         
-        # Get final refined prompt
+        # Pick the best-performing iteration (not necessarily the last)
         if refinement_history:
-            unified_prompt = refinement_history[-1]['prompt']
-            final_accuracy = refinement_history[-1]['accuracy']
+            best_iter = max(refinement_history, key=lambda x: x['accuracy'])
+            unified_prompt = best_iter['prompt']
+            final_accuracy = best_iter['accuracy']
+            print(f"\n   🏆 Best iteration: {best_iter['iteration']} (accuracy: {final_accuracy:.2%})")
         else:
+            unified_prompt = current_prompt
+            final_accuracy = initial_accuracy
+
+        # If best prompt is empty (stripping failure), fall back to initial
+        if not unified_prompt.strip():
+            print(f"   ⚠️  Best prompt was empty, falling back to initial prompt")
             unified_prompt = current_prompt
             final_accuracy = initial_accuracy
         
