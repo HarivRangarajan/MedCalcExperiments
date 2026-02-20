@@ -132,17 +132,30 @@ class BankLifecycleManager:
 
     def compute_utility(self, entry: Dict, eval_summary: Dict) -> float:
         """
-        U(d, g) = difficulty(d) × (1 - accuracy(g, calc(d)))
+        Polarity-aware utility:
 
-        difficulty(d) = contrastive_sharpness  (0.5 if not set — correct entries)
-        accuracy(...)  = per-calculator accuracy for the current model generation
+        Negative entries:
+            U(d, g) = contrastive_sharpness(d) × (1 - accuracy(g, calc(d)))
+            High when model still fails on this calculator.
+
+        Positive entries:
+            U(d, g) = 1.0 - accuracy(g, calc(d))
+            High when model needs guidance on this calculator.
 
         Returns float in [0, 1].
         """
-        difficulty = float(entry.get("contrastive_sharpness", 0.5))
-        calc_name  = entry.get("Calculator Name", "")
-        accuracy   = self._get_calculator_accuracy(calc_name, eval_summary)
-        return difficulty * (1.0 - accuracy)
+        polarity = entry.get("polarity")
+        result = entry.get("Result", "")
+        is_positive = (polarity == "positive") or (polarity is None and result == "Correct")
+
+        calc_name = entry.get("Calculator Name", "")
+        accuracy  = self._get_calculator_accuracy(calc_name, eval_summary)
+
+        if is_positive:
+            return 1.0 - accuracy
+        else:
+            difficulty = float(entry.get("contrastive_sharpness", 0.5))
+            return difficulty * (1.0 - accuracy)
 
     def _compute_all_utilities(
         self, eval_summary: Dict
@@ -218,6 +231,20 @@ class BankLifecycleManager:
                 f.write(json.dumps(entry) + "\n")
 
         # 6. Update bank_metadata.json with per-generation stats
+        # Count by polarity
+        positive_count = sum(
+            1 for e in self.bank
+            if e.get("polarity") == "positive" or
+               (e.get("polarity") is None and e.get("Result") == "Correct")
+        )
+        negative_count = len(self.bank) - positive_count
+        positive_archived = sum(
+            1 for e in archived_entries
+            if e.get("polarity") == "positive" or
+               (e.get("polarity") is None and e.get("Result") == "Correct")
+        ) if archive else 0
+        negative_archived = (len(archived_entries) - positive_archived) if archive else 0
+
         gen_stats = {
             "mean_utility":         round(float(np.mean(utilities)), 4) if utilities else 0.0,
             "min_utility":          round(float(np.min(utilities)),  4) if utilities else 0.0,
@@ -225,7 +252,11 @@ class BankLifecycleManager:
             "below_epsilon_count":  below_epsilon_count,
             "below_epsilon_frac":   round(below_epsilon_count / len(utilities), 3) if utilities else 0.0,
             "archived":             len(archived_entries) if archive else 0,
+            "positive_archived":    positive_archived,
+            "negative_archived":    negative_archived,
             "bank_size_after":      len(self.bank),
+            "positive_remaining":   positive_count,
+            "negative_remaining":   negative_count,
             "fmas":                 round(fmas, 4) if fmas is not None else None,
         }
         self.metadata.setdefault("generation_history", {})[gen_key] = gen_stats
