@@ -125,7 +125,7 @@ class SEACRRetriever:
 
         Args:
             question:          current test question text (from test_data.csv)
-            probe_prediction:  model's output from the probe inference step (no demonstrations)
+            probe_prediction:  model's output from the one-shot probe step (no contrastive demos)
             calculator_id:     string calculator ID for this test example (e.g. "38")
             client:            synchronous OpenAI client for embedding calls
             num_positive:      number of correct demonstrations to return
@@ -189,7 +189,7 @@ class SEACRRetriever:
             FMAS ≈ 0 → model errors have no match in bank → bank is stale for this model
 
         Args:
-            probe_predictions: list of model probe outputs (no demonstrations), one per test example
+            probe_predictions: list of model one-shot probe outputs (no contrastive demos), one per test example
             client: OpenAI client for embedding calls
 
         Returns:

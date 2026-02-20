@@ -30,7 +30,7 @@ This ignores *which mistakes the target model actually makes* and provides rando
 without regard to question similarity. SEACR fixes both retrieval paths:
 
 **SEACR (Self-Error-Anchored Contrastive Retrieval)** fixes this by:
-1. **Probing** the model on the test question without demonstrations → unconstrained prediction
+1. **Probing** the model on the test question with one-shot calculator-ID-based example (no contrastive demonstrations) → unconstrained prediction
 2. **Negative retrieval**: Matching probe prediction to inverted index of wrong answers (error-anchored)
 3. **Positive retrieval**: Smart embedding-based selection weighted by question similarity + calculator match
 4. **Showing** the most relevant contrastive pair — a positive example the model can learn from and
@@ -130,7 +130,7 @@ Changes across all pipeline files to implement:
 The spec assumes an existing bank with ~510 entries (145 incorrect). Our current
 `medcalc_contrastive_edits_evaluation_20260218_234824` has 0 incorrect entries (gpt-5 is
 too accurate on training examples). To handle this, Stage 1 includes `generate_probe_failures()`:
-- Runs probe inference on N training examples (no demonstrations)
+- Runs probe inference on N training examples with one-shot calculator-ID-based examples (no contrastive demos)
 - Collects wrong answers → these seed the incorrect pool
 - Union with any existing incorrect entries → candidate pool for greedy selection
 
@@ -157,6 +157,11 @@ Negative: score(d_i) = 0.8 · sim(embed(probe), inverted_index[i])   # error-anc
 Positive: score(d_i) = 0.6 · sim(embed(question), forward_index[i]) # question similarity
                      + 0.4 · calculator_match(calc_id, d_i)          # calculator bonus
 ```
+
+### Evaluation Strategy
+- **Correctness**: Deterministic `evaluate_answer()` → MedCalc's `check_correctness()` (numerical tolerance, range checks). Same function used by the original MedCalc-Bench repo. NOT LLM-based.
+- **Failure mode classification**: LLM-based (`gpt-4o`) — classifies incorrect answers into 5 categories (arithmetic, formula_selection, input_extraction, unit_conversion, threshold_boundary).
+- **Probing**: One-shot using calculator-ID-based examples from `one_shot_finalized_explanation.json` (no contrastive demonstrations). This provides the formula/context the model needs since medical calculators are domain-specific.
 
 ### Polarity-Aware Utility Decay (Stage 3)
 ```

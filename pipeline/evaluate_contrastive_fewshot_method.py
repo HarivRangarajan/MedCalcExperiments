@@ -338,9 +338,9 @@ class ContrastiveFewShotEvaluator:
     
     async def _probe_inference_async(self, row: pd.Series) -> str:
         """
-        Run the model with zero contrastive demonstrations to get its unconstrained prediction.
-        Uses the same one-shot system prompt as the baseline (just no contrastive pairs).
-        Returns extracted answer string (e.g. "7.75") or "N/A" on failure.
+        Run the model with one-shot calculator-ID-based example (no contrastive demonstrations)
+        to get its unconstrained prediction. Uses the same one-shot system prompt as the
+        MedCalc baseline. Returns extracted answer string (e.g. "7.75") or "N/A" on failure.
         """
         patient_note = row["Patient Note"]
         question     = row["Question"]

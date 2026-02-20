@@ -312,9 +312,9 @@ class SubmodularBankBuilder:
     def compute_fmas_baseline(
         self, inverted_embs: np.ndarray, sample_size: int = 20
     ) -> float:
-        """Probe model on sample_size random train examples (no demonstrations).
-        Compute mean max cosine sim to nearest wrong-answer in inverted_embs.
-        Saves to bank_metadata.json under 'fmas_baseline'."""
+        """Probe model on sample_size random train examples (one-shot calculator-ID-based
+        example, no contrastive demonstrations). Compute mean max cosine sim to nearest
+        wrong-answer in inverted_embs. Saves to bank_metadata.json under 'fmas_baseline'."""
         ...
 
     def run(self) -> str:
@@ -351,6 +351,15 @@ generations (gpt-4o, gpt-5, gpt-3.5-turbo, gpt-4o-mini) without rebuilding.
 ---
 
 ## 3. Stage 2 — SEACR Retrieval
+
+**Evaluation strategy**:
+- **Probing**: One-shot using calculator-ID-based examples from MedCalc's `one_shot_finalized_explanation.json`
+  (no contrastive demonstrations). Medical calculators are domain-specific — without this context the model
+  is almost certain to fail, so we provide one calculator-specific example before probing.
+- **Correctness evaluation**: Deterministic `evaluate_answer()` → MedCalc's `check_correctness()` function
+  (numerical tolerance, range checks). Same function used by the original MedCalc-Bench repo. NOT LLM-based.
+- **Failure mode classification**: LLM-based (gpt-4o) — categorises incorrect answers into 5 types
+  (arithmetic, formula_selection, input_extraction, unit_conversion, threshold_boundary).
 
 ### 3.1 New file: `pipeline/seacr_retrieval.py`
 
@@ -435,7 +444,7 @@ class SEACRRetriever:
         FMAS ≈ 0 → model errors have no match in bank → bank is stale for this model.
 
         Args:
-            probe_predictions: list of model probe outputs (no demonstrations), one per test example
+            probe_predictions: list of model probe outputs (one-shot, no contrastive demos), one per test example
             client: OpenAI client for embedding calls
 
         Returns:
@@ -488,9 +497,9 @@ Insert this new method directly before `_process_single_example_async()` (before
 ```python
 async def _probe_inference_async(self, row: pd.Series) -> str:
     """
-    Run the model with zero contrastive demonstrations to get its unconstrained prediction.
-    Uses the same one-shot system prompt as the baseline (just no contrastive pairs).
-    Returns extracted answer string (e.g. "7.75") or "N/A" on failure.
+    Run the model with one-shot calculator-ID-based example (no contrastive demonstrations)
+    to get its unconstrained prediction. Uses the same one-shot system prompt as the
+    MedCalc baseline. Returns extracted answer string (e.g. "7.75") or "N/A" on failure.
     """
     patient_note = row["Patient Note"]
     question     = row["Question"]

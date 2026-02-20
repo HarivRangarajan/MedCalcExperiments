@@ -36,8 +36,9 @@ Outputs (to outputs/seacr_bank_{timestamp}/):
 Bootstrapping adaptation:
     When the existing bank has 0 incorrect entries (e.g., a new model that
     is very accurate on training data), generate_probe_failures() probes the
-    model on --probe-size training examples without demonstrations and
-    collects wrong predictions as the candidate pool. This is spec-faithful:
+    model on --probe-size training examples with one-shot calculator-ID-based
+    examples (no contrastive demonstrations) and collects wrong predictions
+    as the candidate pool. This is spec-faithful:
     §2.1.2 explicitly includes "new examples generated via probe inference
     on the wider 10k pool" in the candidate set.
 
@@ -204,7 +205,7 @@ class SubmodularBankBuilder:
     # ------------------------------------------------------------------
 
     async def _probe_one(self, row: pd.Series, one_shot_examples: Dict) -> Optional[Dict]:
-        """Run zero-shot probe on one training row. Returns incorrect entry or None."""
+        """Run one-shot probe on one training row (calculator-ID-based example, no contrastive demos). Returns incorrect entry or None."""
         calc_id = str(row["Calculator ID"])
         question = row["Question"]
         patient_note = row["Patient Note"]
@@ -598,7 +599,7 @@ class SubmodularBankBuilder:
         self, inverted_embs: np.ndarray, bank: List[Dict], sample_size: int = 20
     ) -> float:
         """
-        Probe model on sample_size random training examples (no demonstrations).
+        Probe model on sample_size random training examples (one-shot, no contrastive demos).
         Compute mean max cosine sim to nearest wrong-answer in inverted_embs.
         Saves result to bank_metadata.json under 'fmas_baseline'.
         """

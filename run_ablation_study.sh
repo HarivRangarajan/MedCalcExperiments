@@ -21,7 +21,7 @@ set -euo pipefail
 MODEL="gpt-5"
 BANK_DIR=""
 REFINED_DIR=""
-EXISTING_RESULTS_DIR="../outputs/medcalc_contrastive_edits_evaluation_20260218_234824"
+EXISTING_RESULTS_DIR="../outputs/medcalc_contrastive_edits_evaluation_20251010_054434"
 NUM_EXAMPLES=1047
 EVAL_MODELS=""    # empty = use MODEL only; set to "gpt-4o,gpt-5,gpt-3.5-turbo,gpt-4o-mini" for multi-model
 SEACR_BETA_POS=0.6
