@@ -52,7 +52,8 @@ class ContrastiveFewShotEvaluator:
                  save_frequency: int = 50,
                  model: str = "gpt-4o",
                  seacr_bank_dir: str = None,
-                 seacr_alpha: float = 0.8):
+                 seacr_alpha: float = 0.8,
+                 seacr_beta_pos: float = 0.6):
         """
         Initialize the evaluator.
         
@@ -102,7 +103,7 @@ class ContrastiveFewShotEvaluator:
 
         if seacr_bank_dir:
             from seacr_retrieval import SEACRRetriever
-            self.seacr_retriever = SEACRRetriever(seacr_bank_dir, alpha=seacr_alpha)
+            self.seacr_retriever = SEACRRetriever(seacr_bank_dir, alpha=seacr_alpha, beta_pos=seacr_beta_pos)
         else:
             self.seacr_retriever = None
             print("   ℹ️  SEACR disabled — using Calculator ID retrieval (baseline)")
@@ -846,8 +847,22 @@ def main():
         '--seacr-alpha',
         type=float,
         default=0.8,
-        help='Error-anchoring weight for SEACR (default: 0.8). '
+        help='Error-anchoring weight for SEACR negative retrieval (default: 0.8). '
              '1.0 = pure error-anchoring, 0.0 = pure question-matching.'
+    )
+    parser.add_argument(
+        '--seacr-beta-pos',
+        type=float,
+        default=0.6,
+        help='Question-similarity weight for SEACR positive retrieval (default: 0.6). '
+             '1.0 = pure question-matching, 0.0 = pure calculator-match.'
+    )
+    parser.add_argument(
+        '--eval-models',
+        type=str,
+        default=None,
+        help='Comma-separated list of models to evaluate (e.g., "gpt-4o,gpt-5,gpt-3.5-turbo,gpt-4o-mini"). '
+             'When set, runs full evaluation for each model with separate output dirs.'
     )
 
     parser.add_argument(
@@ -870,31 +885,54 @@ def main():
         print("❌ Error: OPENAI_API_KEY environment variable not set")
         sys.exit(1)
     
-    # Initialize and run evaluator
-    evaluator = ContrastiveFewShotEvaluator(
-        api_key=api_key,
-        refined_prompts_dir=args.refined_prompts_dir,
-        training_results_dir=args.training_results_dir,
-        output_dir=args.output_dir,
-        num_test_examples=args.num_test_examples,
-        num_positive=args.num_positive,
-        num_negative=args.num_negative,
-        batch_size=args.batch_size,
-        save_frequency=args.save_frequency,
-        model=args.model,
-        seacr_bank_dir=args.seacr_bank_dir,
-        seacr_alpha=args.seacr_alpha
-    )
-    
-    results = evaluator.run_complete_evaluation(
-        evaluate_baseline=args.evaluate_contrastive_and_baseline,
-        baseline_only=args.baseline_only
-    )
-    
-    print(f"\n✅ Evaluation completed successfully!")
-    print(f"📁 Outputs: {results['output_dir']}")
-    if results['improvement'] is not None:
-        print(f"📈 Final improvement: {results['improvement']:+.2%}")
+    # Determine model list: either multi-model or single
+    if args.eval_models:
+        model_list = [m.strip() for m in args.eval_models.split(",")]
+    else:
+        model_list = [args.model]
+
+    for model_name in model_list:
+        if len(model_list) > 1:
+            print(f"\n{'='*80}")
+            print(f"  EVALUATING MODEL: {model_name}")
+            print(f"{'='*80}")
+
+        # Per-model output dir when multi-model
+        if args.eval_models and args.output_dir is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            suffix = f"_test{args.num_test_examples}" if args.num_test_examples else ""
+            output_dir = str(
+                Path(__file__).parent.parent / "outputs"
+                / f"contrastive_evaluation_{timestamp}_{model_name}{suffix}"
+            )
+        else:
+            output_dir = args.output_dir
+
+        evaluator = ContrastiveFewShotEvaluator(
+            api_key=api_key,
+            refined_prompts_dir=args.refined_prompts_dir,
+            training_results_dir=args.training_results_dir,
+            output_dir=output_dir,
+            num_test_examples=args.num_test_examples,
+            num_positive=args.num_positive,
+            num_negative=args.num_negative,
+            batch_size=args.batch_size,
+            save_frequency=args.save_frequency,
+            model=model_name,
+            seacr_bank_dir=args.seacr_bank_dir,
+            seacr_alpha=args.seacr_alpha,
+            seacr_beta_pos=args.seacr_beta_pos
+        )
+
+        results = evaluator.run_complete_evaluation(
+            evaluate_baseline=args.evaluate_contrastive_and_baseline,
+            baseline_only=args.baseline_only
+        )
+
+        print(f"\n✅ Evaluation completed for {model_name}!")
+        print(f"📁 Outputs: {results['output_dir']}")
+        if results['improvement'] is not None:
+            print(f"📈 Final improvement: {results['improvement']:+.2%}")
 
 
 if __name__ == "__main__":
