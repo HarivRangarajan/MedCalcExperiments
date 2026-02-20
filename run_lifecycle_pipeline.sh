@@ -21,7 +21,7 @@ GENERATION=1
 BANK_DIR=""
 REFINED_DIR=""
 EXISTING_RESULTS_DIR="../outputs/medcalc_contrastive_edits_evaluation_20251010_054434"
-PROBE_SIZE=60
+PROBE_SIZE=300
 TARGET_SIZE=550
 POSITIVE_RATIO=0.45
 NUM_TEST_EXAMPLES=1047
@@ -90,10 +90,11 @@ fi
 # ---------------------------------------------------------------------------
 if [[ -z "$REFINED_DIR" ]]; then
   echo ""
-  echo "📝 Prompt Refinement"
+  echo "📝 Prompt Refinement (bank-based, 5 iterations × 20 examples)"
   python pipeline/prompt_refinement_pipeline.py \
+    --bank-dir "$BANK_DIR" \
     --results-dir "$EXISTING_RESULTS_DIR" \
-    --batch-size 10 \
+    --batch-size 20 \
     --max-iterations 5 \
     --model gpt-5
   REFINED_DIR=$(ls -td ../outputs/refined_prompts_* | head -n 1)

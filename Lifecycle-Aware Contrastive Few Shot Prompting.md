@@ -921,13 +921,13 @@ EVAL_MODELS=""                 # empty = use MODEL; set for multi-model
 # Stage 2: SEACR evaluation loops over EVAL_MODELS (or MODEL if not set)
 # Stage 3: Lifecycle tagging per model (archival optional via --archive)
 
-# Prompt refinement: 5 iterations × batch 10 = 50 examples (gpt-5 refiner)
+# Prompt refinement: 5 iterations × batch 20 = 100 examples from bank (gpt-5 refiner)
 ```
 
 **Key design choices**:
 - Stage 1 always uses `--inference-model gpt-4o` (bank built from previous model)
 - Stage 1 passes `--target-size 550 --positive-ratio 0.45` for contrastive bank
-- Prompt refinement uses `--batch-size 10 --max-iterations 5`
+- Prompt refinement uses `--bank-dir $BANK_DIR --batch-size 20 --max-iterations 5` (100 examples from bank)
 - Stage 2 + Stage 3 loop over each model in `EVAL_MODELS`
 - Archival is off by default (`--no-archive`); pass `--archive` to enable
 
@@ -1011,7 +1011,7 @@ outputs/
 | Full pipeline orchestration | `run_lifecycle_pipeline.sh` | **New file** |
 | Ablation runner | `run_ablation_study.sh` | **New file** |
 
-**Files also modified**: `prompt_refinement_pipeline.py` (batch_size 10, max_iterations 5).
+**Files also modified**: `prompt_refinement_pipeline.py` (batch_size 20, max_iterations 5, added `--bank-dir` support).
 **Files NOT touched**: `contrastive_demonstration_generation.py`, `visualize_results.py`, `custom_llm_judge.py`.
 
 ---
@@ -1093,10 +1093,11 @@ python pipeline/submodular_bank_construction.py \
   --inference-model gpt-4o
 BANK_DIR=$(ls -td ../outputs/seacr_bank_* | head -n 1)
 
-# 2. Prompt refinement (5 iterations × batch 10 = 50 examples, gpt-5 refiner)
+# 2. Prompt refinement (5 iterations × batch 20 = 100 examples from bank, gpt-5 refiner)
 python pipeline/prompt_refinement_pipeline.py \
-  --results-dir ../outputs/medcalc_contrastive_edits_evaluation_20260218_234824 \
-  --batch-size 10 --max-iterations 5 --model gpt-5
+  --bank-dir "$BANK_DIR" \
+  --results-dir ../outputs/medcalc_contrastive_edits_evaluation_20251010_054434 \
+  --batch-size 20 --max-iterations 5 --model gpt-5
 REFINED_DIR=$(ls -td ../outputs/refined_prompts_* | head -n 1)
 
 # 3. Stage 2: SEACR evaluation across all models

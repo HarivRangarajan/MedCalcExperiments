@@ -4,10 +4,21 @@ Iterative Prompt Refinement Pipeline
 
 This module performs iterative refinement of prompts using feedback from
 correct and incorrect responses. It processes responses in batches and
-uses GPT-4o to make guided edits to improve prompt performance.
+uses an LLM to make guided edits to improve prompt performance.
+
+Supports two example sources (backward compatible):
+  --results-dir  Load correct/incorrect from prior evaluation JSONL files (legacy)
+  --bank-dir     Load positive/negative examples from SEACR bank.jsonl (preferred)
+
+When --bank-dir is provided, --results-dir is optional (used only for
+loading enhanced prompts to seed the initial unified prompt).
 
 Usage:
-    python prompt_refinement_pipeline.py --results-dir <path> --batch-size 17
+    # Bank-based (preferred):
+    python prompt_refinement_pipeline.py --bank-dir outputs/seacr_bank_* --batch-size 20
+
+    # Legacy (from evaluation results):
+    python prompt_refinement_pipeline.py --results-dir <path> --batch-size 20
 """
 
 import json
@@ -40,56 +51,67 @@ from shared_utils import (
 class PromptRefinementPipeline:
     """Pipeline for iterative prompt refinement using feedback signals."""
     
-    def __init__(self, 
+    def __init__(self,
                  api_key: str,
-                 results_dir: str,
-                 batch_size: int = 10,
+                 results_dir: str = None,
+                 bank_dir: str = None,
+                 batch_size: int = 20,
                  max_iterations: int = 5,
                  output_dir: str = None,
                  model: str = "gpt-5"):
         """
         Initialize the refinement pipeline.
-        
+
         Args:
             api_key: OpenAI API key
-            results_dir: Directory containing evaluation results
-            batch_size: Number of examples per refinement batch
-            max_iterations: Maximum number of iterations (None = use all examples)
+            results_dir: Directory containing evaluation results (legacy source)
+            bank_dir: Directory containing SEACR bank.jsonl (preferred source)
+            batch_size: Number of examples per refinement batch (default: 20)
+            max_iterations: Maximum number of iterations (default: 5)
             output_dir: Output directory for refined prompts
             model: OpenAI model to use for refinement (default: gpt-5)
         """
+        if not results_dir and not bank_dir:
+            raise ValueError("At least one of --results-dir or --bank-dir must be provided")
+
         self.api_key = api_key
         self.model = model
         self.client = OpenAI(api_key=api_key)
         self.async_client = AsyncOpenAI(api_key=api_key)
-        self.results_dir = Path(results_dir)
+        self.results_dir = Path(results_dir) if results_dir else None
+        self.bank_dir = Path(bank_dir) if bank_dir else None
         self.batch_size = batch_size
         self.max_iterations = max_iterations
-        
+
         if output_dir is None:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             output_dir = Path(__file__).parent.parent / "outputs" / f"refined_prompts_{timestamp}"
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Create subdirectories
         (self.output_dir / "iterations").mkdir(exist_ok=True)
         (self.output_dir / "final").mkdir(exist_ok=True)
         (self.output_dir / "logs").mkdir(exist_ok=True)
         (self.output_dir / "evaluation_progress").mkdir(exist_ok=True)
-        
+
         # Load training examples for evaluation
         self.training_examples = self._load_training_examples()
-        
+
         # Load MedCalc one-shot examples for proper evaluation
         self.one_shot_examples = load_medcalc_one_shot_examples()
-        
+
         # Track evaluation progress
         self.evaluation_history = []
-        
+
+        # Determine example source
+        self.use_bank = bank_dir is not None
+
         print(f"✅ Refinement pipeline initialized")
         print(f"   • Model: {self.model}")
-        print(f"   • Results dir: {self.results_dir}")
+        print(f"   • Example source: {'bank (' + str(self.bank_dir) + ')' if self.use_bank else 'results dir (' + str(self.results_dir) + ')'}")
+        if self.results_dir:
+            print(f"   • Results dir: {self.results_dir}")
         print(f"   • Output dir: {self.output_dir}")
         print(f"   • Batch size: {self.batch_size}")
         print(f"   • Max iterations: {self.max_iterations or 'unlimited'}")
@@ -130,43 +152,89 @@ class PromptRefinementPipeline:
             raise ValueError(f"Prompt type '{prompt_type}' not found in enhanced prompts")
     
     def _load_training_examples(self) -> pd.DataFrame:
-        """Load the 170 training examples used for contrastive generation."""
-        # Load the saved indices
-        indices_file = self.results_dir / "data" / "training_sample_indices.json"
-        
-        if not indices_file.exists():
-            print(f"⚠️  Training sample indices not found, regenerating from correct/incorrect files...")
-            # Regenerate from correct/incorrect files
-            row_numbers = set()
-            for subdir in ['correct', 'incorrect']:
-                subdir_path = self.results_dir / subdir
-                if subdir_path.exists():
-                    for jsonl_file in subdir_path.glob('*.jsonl'):
-                        with open(jsonl_file, 'r') as f:
-                            for line in f:
-                                data = json.loads(line)
-                                row_numbers.add(data['Row Number'])
-            
-            # Save indices for future use
-            (self.results_dir / "data").mkdir(exist_ok=True)
-            with open(indices_file, 'w') as f:
-                json.dump(sorted(list(row_numbers)), f)
-            print(f"   ✓ Saved {len(row_numbers)} training indices")
-        else:
-            with open(indices_file, 'r') as f:
-                row_numbers = json.load(f)
-            print(f"   ✓ Loaded {len(row_numbers)} training sample indices")
-        
-        # Load the full train_data.csv
+        """Load training examples for evaluation.
+
+        When bank_dir is provided, extracts Row Numbers from bank.jsonl.
+        Otherwise, falls back to results_dir indices (legacy).
+        """
         train_data_path = Path(__file__).parent.parent / "MedCalc-Bench" / "dataset" / "train_data.csv"
         df = pd.read_csv(train_data_path)
-        
-        # Filter to only the 170 examples
-        df_filtered = df[df['Row Number'].isin(row_numbers)].copy()
-        
-        print(f"   ✓ Loaded {len(df_filtered)} training examples for evaluation")
-        return df_filtered
+
+        # Try bank first, then results dir
+        if self.bank_dir:
+            bank_file = Path(self.bank_dir) / "bank.jsonl"
+            if bank_file.exists():
+                row_numbers = set()
+                with open(bank_file, 'r') as f:
+                    for line in f:
+                        entry = json.loads(line)
+                        rn = entry.get("Row Number")
+                        if rn is not None:
+                            row_numbers.add(rn)
+                print(f"   ✓ Loaded {len(row_numbers)} row indices from bank")
+                df_filtered = df[df['Row Number'].isin(row_numbers)].copy()
+                print(f"   ✓ Matched {len(df_filtered)} training examples for evaluation")
+                return df_filtered
+
+        if self.results_dir:
+            indices_file = self.results_dir / "data" / "training_sample_indices.json"
+
+            if not indices_file.exists():
+                print(f"⚠️  Training sample indices not found, regenerating from correct/incorrect files...")
+                row_numbers = set()
+                for subdir in ['correct', 'incorrect']:
+                    subdir_path = self.results_dir / subdir
+                    if subdir_path.exists():
+                        for jsonl_file in subdir_path.glob('*.jsonl'):
+                            with open(jsonl_file, 'r') as f:
+                                for line in f:
+                                    data = json.loads(line)
+                                    row_numbers.add(data['Row Number'])
+                (self.results_dir / "data").mkdir(exist_ok=True)
+                with open(indices_file, 'w') as f:
+                    json.dump(sorted(list(row_numbers)), f)
+                print(f"   ✓ Saved {len(row_numbers)} training indices")
+            else:
+                with open(indices_file, 'r') as f:
+                    row_numbers = json.load(f)
+                print(f"   ✓ Loaded {len(row_numbers)} training sample indices")
+
+            df_filtered = df[df['Row Number'].isin(row_numbers)].copy()
+            print(f"   ✓ Loaded {len(df_filtered)} training examples for evaluation")
+            return df_filtered
+
+        # Fallback: sample 200 random training examples
+        print(f"⚠️  No indices source available, sampling 200 random training examples")
+        return df.sample(200, random_state=42).reset_index(drop=True)
     
+    def _load_bank_examples(self) -> Tuple[List[Dict], List[Dict]]:
+        """Load positive and negative examples from SEACR bank.jsonl.
+
+        Returns:
+            (positive_examples, negative_examples) — each entry is a dict with
+            at least: Calculator Name, Patient Note, Question, LLM Answer,
+            Ground Truth Answer, LLM Explanation, Result, polarity.
+        """
+        bank_file = self.bank_dir / "bank.jsonl"
+        positive, negative = [], []
+        with open(bank_file, 'r') as f:
+            for line in f:
+                entry = json.loads(line)
+                # Normalise the Result field for downstream compatibility
+                polarity = entry.get("polarity", "")
+                if polarity == "positive":
+                    entry.setdefault("Result", "Correct")
+                    positive.append(entry)
+                else:
+                    entry.setdefault("Result", "Incorrect")
+                    negative.append(entry)
+
+        print(f"📦 Loaded bank examples from {bank_file}:")
+        print(f"   • Positive (correct): {len(positive)}")
+        print(f"   • Negative (incorrect): {len(negative)}")
+        print(f"   • Total: {len(positive) + len(negative)}")
+        return positive, negative
+
     async def _evaluate_single_example_async(self, prompt: str, row: pd.Series) -> Dict[str, Any]:
         """Evaluate a single example asynchronously."""
         try:
@@ -713,13 +781,28 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
         print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Model: {self.model}\n")
         
-        # Load ALL training examples from all prompt types
-        print("📋 Loading training examples from all sources (CoT, CoD, etc.)...")
-        all_correct, all_incorrect = self.load_all_training_examples()
-        
+        # Load examples — bank-based or legacy
+        if self.use_bank:
+            print("📋 Loading examples from SEACR bank...")
+            all_correct, all_incorrect = self._load_bank_examples()
+        else:
+            print("📋 Loading training examples from all sources (CoT, CoD, etc.)...")
+            all_correct, all_incorrect = self.load_all_training_examples()
+
         # Start with initial unified prompt
         print(f"\n📝 Creating initial unified prompt...")
-        current_prompt = self.create_initial_unified_prompt()
+        if self.results_dir and (self.results_dir / "prompts" / "enhanced_prompts.json").exists():
+            current_prompt = self.create_initial_unified_prompt()
+        else:
+            # No prior enhanced prompts — use a sensible default
+            current_prompt = (
+                "You are a helpful assistant for calculating a medical score for a given patient note. "
+                "Please think step-by-step to solve the question and then generate the required score. "
+                'Your output should only contain a JSON dict formatted as '
+                '{"step_by_step_thinking": str(your_step_by_step_thinking), '
+                '"answer": str(short_and_direct_answer_of_the_question)}.'
+            )
+            print(f"   ✓ Using default medical calculator prompt ({len(current_prompt)} characters)")
         print(f"   ✓ Initial prompt created ({len(current_prompt)} characters)")
         
         # Save initial prompt
@@ -838,22 +921,29 @@ def main():
     parser.add_argument(
         '--results-dir',
         type=str,
-        required=True,
-        help='Directory containing evaluation results'
+        default=None,
+        help='Directory containing evaluation results (legacy source). Optional when --bank-dir is provided.'
     )
-    
+
+    parser.add_argument(
+        '--bank-dir',
+        type=str,
+        default=None,
+        help='Directory containing SEACR bank.jsonl (preferred source). Loads positive/negative from bank.'
+    )
+
     parser.add_argument(
         '--batch-size',
         type=int,
-        default=10,
-        help='Number of examples per refinement batch (default: 10)'
+        default=20,
+        help='Number of examples per refinement batch (default: 20)'
     )
 
     parser.add_argument(
         '--max-iterations',
         type=int,
         default=5,
-        help='Maximum number of iterations (default: 5, processing 50 examples total with batch_size=10)'
+        help='Maximum number of iterations (default: 5, processing 100 examples total with batch_size=20)'
     )
     
     parser.add_argument(
@@ -878,10 +968,15 @@ def main():
         print("❌ Error: OPENAI_API_KEY environment variable not set")
         sys.exit(1)
     
+    if not args.results_dir and not args.bank_dir:
+        print("❌ Error: At least one of --results-dir or --bank-dir must be provided")
+        sys.exit(1)
+
     # Initialize and run pipeline
     pipeline = PromptRefinementPipeline(
         api_key=api_key,
         results_dir=args.results_dir,
+        bank_dir=args.bank_dir,
         batch_size=args.batch_size,
         max_iterations=args.max_iterations,
         output_dir=args.output_dir,

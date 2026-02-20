@@ -111,7 +111,9 @@ Changes across all pipeline files to implement:
 - Multi-model evaluation loop
 
 **prompt_refinement_pipeline.py**:
-- batch_size 5→10, max_iterations 34→5
+- batch_size 5→20, max_iterations 34→5
+- Added `--bank-dir` support: loads positive/negative examples directly from SEACR bank.jsonl
+- `--results-dir` is now optional (used only for seeding initial prompt from enhanced_prompts.json)
 
 **bank_lifecycle_manager.py**:
 - Polarity-aware utility: positive U = 1-accuracy, negative U = sharpness×(1-accuracy)
