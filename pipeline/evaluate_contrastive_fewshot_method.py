@@ -50,7 +50,9 @@ class ContrastiveFewShotEvaluator:
                  num_negative: int = 1,
                  batch_size: int = 10,
                  save_frequency: int = 50,
-                 model: str = "gpt-4o"):
+                 model: str = "gpt-4o",
+                 seacr_bank_dir: str = None,
+                 seacr_alpha: float = 0.8):
         """
         Initialize the evaluator.
         
@@ -94,7 +96,17 @@ class ContrastiveFewShotEvaluator:
         
         # Load contrastive examples
         self.contrastive_examples = self._load_contrastive_examples()
-        
+
+        # SEACR retrieval (Stage 2 — overrides get_contrastive_examples if provided)
+        self._probe_predictions: List[str] = []   # accumulates during evaluation for FMAS
+
+        if seacr_bank_dir:
+            from seacr_retrieval import SEACRRetriever
+            self.seacr_retriever = SEACRRetriever(seacr_bank_dir, alpha=seacr_alpha)
+        else:
+            self.seacr_retriever = None
+            print("   ℹ️  SEACR disabled — using Calculator ID retrieval (baseline)")
+
         print(f"✅ Contrastive evaluator initialized")
         print(f"   • Refined prompts: {self.refined_prompts_dir}")
         print(f"   • Training results: {self.training_results_dir}")
@@ -323,6 +335,33 @@ class ContrastiveFewShotEvaluator:
         
         return answer, explanation
     
+    async def _probe_inference_async(self, row: pd.Series) -> str:
+        """
+        Run the model with zero contrastive demonstrations to get its unconstrained prediction.
+        Uses the same one-shot system prompt as the baseline (just no contrastive pairs).
+        Returns extracted answer string (e.g. "7.75") or "N/A" on failure.
+        """
+        patient_note = row["Patient Note"]
+        question     = row["Question"]
+        calculator_id = str(row["Calculator ID"])
+
+        try:
+            system_msg, user_msg = self.create_original_one_shot_prompt(
+                patient_note, question, calculator_id
+            )
+            response = await self.async_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": user_msg}
+                ]
+            )
+            raw = re.sub(r"\s+", " ", response.choices[0].message.content)
+            probe_answer, _ = self.extract_answer(raw, int(calculator_id))
+            return probe_answer if probe_answer != "N/A" else "N/A"
+        except Exception:
+            return "N/A"
+
     async def _process_single_example_async(self,
                                             row: pd.Series,
                                             prompt_type: str,
@@ -340,9 +379,49 @@ class ContrastiveFewShotEvaluator:
                     patient_note, question, calculator_id
                 )
             elif prompt_type == "contrastive_few_shot":
-                system_msg, user_msg = self.create_contrastive_few_shot_prompt(
-                    patient_note, question, calculator_id, unified_prompt
-                )
+                if self.seacr_retriever is not None:
+                    # SEACR path: probe first, then error-anchored retrieval
+                    probe_prediction = await self._probe_inference_async(row)
+                    self._probe_predictions.append(probe_prediction)
+
+                    positive_examples, negative_examples = self.seacr_retriever.retrieve(
+                        question=question,
+                        probe_prediction=probe_prediction,
+                        calculator_id=calculator_id,
+                        client=self.client,
+                        num_positive=self.num_positive,
+                        num_negative=self.num_negative
+                    )
+                    # Build prompt with SEACR-retrieved examples (same format as baseline)
+                    system_msg = unified_prompt
+                    one_shot_example = self.one_shot_examples.get(calculator_id)
+                    if one_shot_example:
+                        system_msg += f'\n\n**Example (Correct Approach):**\n'
+                        system_msg += f'Patient Note: {one_shot_example["Patient Note"][:500]}...\n'
+                        system_msg += f'Task: {question}\n'
+                        system_msg += f'Response: {json.dumps({"step_by_step_thinking": one_shot_example["Response"]["step_by_step_thinking"], "answer": one_shot_example["Response"]["answer"]})}'
+                    if positive_examples:
+                        system_msg += f'\n\n**Additional Correct Examples:**\n'
+                        for i, ex in enumerate(positive_examples, 1):
+                            system_msg += f'\nExample {i} (CORRECT):\n'
+                            system_msg += f'Patient Note: {ex["Patient Note"][:300]}...\n'
+                            system_msg += f'Task: {ex["Question"][:200]}...\n'
+                            system_msg += f'LLM Answer: {ex["LLM Answer"]}\n'
+                            system_msg += f'Ground Truth: {ex["Ground Truth Answer"]}\n'
+                    if negative_examples:
+                        system_msg += f'\n\n**Examples to AVOID (Common Mistakes):**\n'
+                        for i, ex in enumerate(negative_examples, 1):
+                            system_msg += f'\nExample {i} (INCORRECT - Learn from this mistake):\n'
+                            system_msg += f'Patient Note: {ex["Patient Note"][:300]}...\n'
+                            system_msg += f'Task: {ex["Question"][:200]}...\n'
+                            system_msg += f'Incorrect LLM Answer: {ex["LLM Answer"]}\n'
+                            system_msg += f'Correct Answer Should Be: {ex["Ground Truth Answer"]}\n'
+                    user_msg = f'Here is the patient note:\n\n{patient_note}\n\nHere is the task:\n\n{question}\n\nPlease directly output the JSON dict with your step-by-step thinking and final answer.'
+                else:
+                    # Fallback: existing Calculator ID → random.sample() path (baseline)
+                    system_msg, user_msg = self.create_contrastive_few_shot_prompt(
+                        patient_note, question, calculator_id, unified_prompt
+                    )
             else:
                 raise ValueError(f"Unknown prompt type: {prompt_type}")
             
@@ -644,7 +723,31 @@ class ContrastiveFewShotEvaluator:
         eval_file = self.output_dir / "evaluations" / "evaluation_summary.json"
         with open(eval_file, 'w') as f:
             json.dump(eval_summary, f, indent=2)
-        
+
+        # Compute and save FMAS if SEACR was used
+        if self.seacr_retriever is not None and self._probe_predictions:
+            print("\n📐 Computing FMAS (Failure Mode Alignment Score)...")
+            fmas = self.seacr_retriever.compute_fmas(self._probe_predictions, self.client)
+            print(f"   • FMAS: {fmas:.4f}  (1.0 = perfect alignment, 0.0 = stale bank)")
+
+            fmas_report = {
+                "fmas": fmas,
+                "model": self.model,
+                "num_probe_predictions": len(self._probe_predictions),
+                "seacr_alpha": self.seacr_retriever.alpha,
+                "bank_dir": str(self.seacr_retriever.bank_dir),
+                "timestamp": datetime.now().isoformat()
+            }
+            fmas_file = self.output_dir / "evaluations" / "fmas_report.json"
+            with open(fmas_file, 'w') as f:
+                json.dump(fmas_report, f, indent=2)
+            print(f"   💾 FMAS report: {fmas_file}")
+
+            # Add FMAS into eval_summary for the lifecycle manager to pick up
+            eval_summary["fmas"] = fmas
+            with open(eval_file, 'w') as f:
+                json.dump(eval_summary, f, indent=2)
+
         print(f"\n💾 Saved evaluation summary to: {eval_file}")
         
         print(f"\n{'='*80}")
@@ -731,7 +834,22 @@ def main():
         default='gpt-4o',
         help='OpenAI model to use for evaluation (default: gpt-4o)'
     )
-    
+
+    parser.add_argument(
+        '--seacr-bank-dir',
+        type=str,
+        default=None,
+        help='Path to seacr_bank_* directory (Stage 1 output). '
+             'If omitted, uses Calculator ID retrieval (baseline).'
+    )
+    parser.add_argument(
+        '--seacr-alpha',
+        type=float,
+        default=0.8,
+        help='Error-anchoring weight for SEACR (default: 0.8). '
+             '1.0 = pure error-anchoring, 0.0 = pure question-matching.'
+    )
+
     parser.add_argument(
         '--evaluate-contrastive-and-baseline',
         action='store_true',
@@ -763,7 +881,9 @@ def main():
         num_negative=args.num_negative,
         batch_size=args.batch_size,
         save_frequency=args.save_frequency,
-        model=args.model
+        model=args.model,
+        seacr_bank_dir=args.seacr_bank_dir,
+        seacr_alpha=args.seacr_alpha
     )
     
     results = evaluator.run_complete_evaluation(
