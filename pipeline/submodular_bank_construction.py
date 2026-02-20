@@ -3,18 +3,32 @@
 Stage 1: Submodular Bank Construction
 ======================================
 
-Builds a principled few-shot demonstration bank by greedily selecting
-from the candidate pool (existing bank entries + probe-generated failures)
-to maximise coverage across failure modes, calculators, and error sharpness.
+Builds a principled contrastive demonstration bank by greedily selecting
+BOTH positive (correct) and negative (incorrect) examples from the candidate
+pool to maximise coverage across failure modes, calculators, categories,
+and error sharpness.
 
-Submodular objective:
+Philosophy — "Demonstrations as Living Language":
+    The bank is built ONCE using a previous model (default: gpt-4o) and
+    reused across model generations. FMAS scores are tagged per-generation
+    in Stage 3, but the bank itself is never automatically rebuilt. This
+    allows studying how a fixed demonstration set transfers across models.
+
+Negative (incorrect) objective:
     Utility(S) = alpha * FailureModeCoverage(S)
                + beta  * CalculatorCoverage(S)
                + gamma * ErrorProximitySharpness(S)
                - delta * Redundancy(S)
 
+Positive (correct) objective:
+    Utility(S) = alpha_pos * CalculatorCoverage(S)
+               + beta_pos  * CategoryCoverage(S)
+               - delta_pos * Redundancy(S)
+
+Bank entries are stamped with a "polarity" field: "positive" or "negative".
+
 Outputs (to outputs/seacr_bank_{timestamp}/):
-    bank.jsonl          enriched entries (failure_mode, contrastive_sharpness, generation)
+    bank.jsonl          enriched entries (polarity, failure_mode, contrastive_sharpness, generation)
     embeddings.npz      forward index: question embeddings (N, 1536)
     inverted_index.npz  inverted index: wrong-answer embeddings (N, 1536)
     bank_metadata.json  coverage stats, fmas_baseline, failure_mode_distribution
@@ -31,7 +45,8 @@ Usage:
     python pipeline/submodular_bank_construction.py \\
         --existing-bank-dir ../outputs/medcalc_contrastive_edits_evaluation_* \\
         --train-csv MedCalc-Bench/dataset/train_data.csv \\
-        --target-size 170 \\
+        --target-size 550 \\
+        --positive-ratio 0.45 \\
         --probe-size 60 \\
         --labeling-model gpt-4o
 """
@@ -85,16 +100,20 @@ Output only the category label, nothing else."""
 
 class SubmodularBankBuilder:
     """
-    Builds a submodular demonstration bank for SEACR retrieval.
+    Builds a submodular contrastive demonstration bank for SEACR retrieval.
+
+    Selects BOTH positive (correct) and negative (incorrect) examples via
+    greedy submodular optimization with separate objectives for each polarity.
 
     Orchestrates:
       1. Loading existing bank entries
       2. Probe inference to generate failures when bank is empty
       3. LLM failure-mode labeling (async, batched)
       4. Contrastive sharpness computation
-      5. Greedy submodular selection
-      6. Index construction (forward + inverted)
-      7. FMAS baseline measurement
+      5. Greedy submodular selection (negatives)
+      6. Greedy submodular selection (positives)
+      7. Index construction (forward + inverted)
+      8. FMAS baseline measurement
     """
 
     def __init__(
@@ -103,7 +122,8 @@ class SubmodularBankBuilder:
         existing_bank_dir: str,
         train_csv_path: str,
         output_dir: str,
-        target_size: int = 170,
+        target_size: int = 550,
+        positive_ratio: float = 0.45,
         probe_size: int = 60,
         alpha: float = 0.35,
         beta: float = 0.35,
@@ -118,6 +138,9 @@ class SubmodularBankBuilder:
         self.train_csv_path = Path(train_csv_path)
         self.output_dir = Path(output_dir)
         self.target_size = target_size
+        self.positive_ratio = positive_ratio
+        self.positive_target = int(target_size * positive_ratio)
+        self.negative_target = target_size - self.positive_target
         self.probe_size = probe_size
         self.alpha = alpha
         self.beta = beta
@@ -140,8 +163,8 @@ class SubmodularBankBuilder:
         print(f"   • Bank dir:   {self.existing_bank_dir}")
         print(f"   • Train CSV:  {self.train_csv_path}")
         print(f"   • Output:     {self.output_dir}")
-        print(f"   • Target K:   {self.target_size}")
-        print(f"   • α={alpha} β={beta} γ={gamma} δ={delta}")
+        print(f"   • Target K:   {self.target_size} (positive={self.positive_target}, negative={self.negative_target})")
+        print(f"   • Negative obj: α={alpha} β={beta} γ={gamma} δ={delta}")
 
     # ------------------------------------------------------------------
     # Step 1: Load existing bank
@@ -399,20 +422,21 @@ class SubmodularBankBuilder:
 
     def greedy_select(self, labeled_incorrect: List[Dict]) -> List[Dict]:
         """
-        Greedy submodular selection of K=target_size entries from candidates.
+        Greedy submodular selection of K=negative_target entries from incorrect candidates.
         Pre-embeds all candidates to avoid repeated API calls.
         """
         candidates = labeled_incorrect
         if not candidates:
-            print("   ⚠️  No candidates for greedy selection — bank will be empty.")
+            print("   ⚠️  No incorrect candidates for greedy selection.")
             return []
 
-        print(f"   • Greedy selection: K={self.target_size} from {len(candidates)} candidates")
+        K = min(self.negative_target, len(candidates))
+        print(f"   • Greedy negative selection: K={K} from {len(candidates)} candidates")
 
         S: List[Dict] = []
         candidate_set = list(candidates)
 
-        for step in range(min(self.target_size, len(candidate_set))):
+        for step in range(K):
             best_gain, best_d = -float("inf"), None
             for d in candidate_set:
                 if d in S:
@@ -424,9 +448,64 @@ class SubmodularBankBuilder:
                 break
             S.append(best_d)
             if (step + 1) % 20 == 0:
-                print(f"      step {step+1}/{self.target_size}  utility={self._compute_utility(S):.4f}")
+                print(f"      step {step+1}/{K}  utility={self._compute_utility(S):.4f}")
 
-        print(f"   ✓ Selected {len(S)} entries  final utility={self._compute_utility(S):.4f}")
+        print(f"   ✓ Selected {len(S)} negative entries  final utility={self._compute_utility(S):.4f}")
+        return S
+
+    # ------------------------------------------------------------------
+    # Step 5b: Positive example submodular selection
+    # ------------------------------------------------------------------
+
+    def _category_coverage(self, S: List[Dict]) -> float:
+        """Fraction of distinct Category values represented in S."""
+        all_cats = set(str(e.get("Category", "")) for e in S if e.get("Category"))
+        # MedCalc-Bench has ~10 categories; normalise by observed set
+        return min(1.0, len(all_cats) / 10)
+
+    def _positive_utility(self, S: List[Dict]) -> float:
+        """Submodular utility for a set of positive (correct) examples."""
+        return (
+            0.45 * self._calculator_coverage(S)
+            + 0.35 * self._category_coverage(S)
+            - 0.20 * self._redundancy(S)
+        )
+
+    def greedy_select_positive(self, all_correct: List[Dict]) -> List[Dict]:
+        """
+        Greedy submodular selection of K=positive_target entries from correct candidates.
+        Objective maximises calculator and category coverage while penalising redundancy.
+        If fewer candidates than target, returns all.
+        """
+        if not all_correct:
+            print("   ⚠️  No correct candidates for positive selection.")
+            return []
+
+        K = self.positive_target
+        if len(all_correct) <= K:
+            print(f"   • Using all {len(all_correct)} correct examples (≤ target {K})")
+            return list(all_correct)
+
+        print(f"   • Greedy positive selection: K={K} from {len(all_correct)} candidates")
+
+        S: List[Dict] = []
+        candidate_set = list(all_correct)
+
+        for step in range(K):
+            best_gain, best_d = -float("inf"), None
+            for d in candidate_set:
+                if d in S:
+                    continue
+                gain = self._positive_utility(S + [d]) - self._positive_utility(S)
+                if gain > best_gain:
+                    best_gain, best_d = gain, d
+            if best_d is None:
+                break
+            S.append(best_d)
+            if (step + 1) % 50 == 0:
+                print(f"      step {step+1}/{K}  positive_utility={self._positive_utility(S):.4f}")
+
+        print(f"   ✓ Selected {len(S)} positive entries  final utility={self._positive_utility(S):.4f}")
         return S
 
     # ------------------------------------------------------------------
@@ -434,16 +513,24 @@ class SubmodularBankBuilder:
     # ------------------------------------------------------------------
 
     def build_indexes(
-        self, selected_incorrect: List[Dict], all_correct: List[Dict]
+        self, selected_incorrect: List[Dict], selected_correct: List[Dict]
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Build and save forward (question) + inverted (wrong-answer) indexes.
 
-        bank = selected_incorrect + all_correct
+        bank = selected_incorrect + selected_correct
         forward_embs[i]  = embed(bank[i].Question)       for all entries
         inverted_embs[i] = embed(bank[i].LLM_Answer)     for incorrect entries; zeros for correct
+
+        Each entry is stamped with polarity: "negative" (incorrect) or "positive" (correct).
         """
-        bank = selected_incorrect + all_correct
+        # Stamp polarity on each entry
+        for entry in selected_incorrect:
+            entry["polarity"] = "negative"
+        for entry in selected_correct:
+            entry["polarity"] = "positive"
+
+        bank = selected_incorrect + selected_correct
 
         # Forward index: embed questions
         questions = [e["Question"] for e in bank]
@@ -474,6 +561,10 @@ class SubmodularBankBuilder:
             bank[global_i]["contrastive_sharpness"] = round(sharpness, 4)
             bank[global_i].setdefault("generation", 1)
 
+        # Correct entries: set default fields
+        for entry in selected_correct:
+            entry.setdefault("generation", 1)
+
         # Save bank.jsonl
         bank_file = self.output_dir / "bank.jsonl"
         with open(bank_file, "w") as f:
@@ -492,7 +583,9 @@ class SubmodularBankBuilder:
 
         self._metadata["bank_size"] = len(bank)
         self._metadata["num_incorrect"] = len(selected_incorrect)
-        self._metadata["num_correct"] = len(all_correct)
+        self._metadata["num_correct"] = len(selected_correct)
+        self._metadata["num_positive_selected"] = len(selected_correct)
+        self._metadata["num_negative_selected"] = len(selected_incorrect)
         self._metadata["original_bank_size"] = len(bank)
 
         return forward_embs, inverted_embs
@@ -548,48 +641,57 @@ class SubmodularBankBuilder:
         print("=" * 60)
 
         # 1. Load existing bank
-        print("\n[1/7] Loading existing bank...")
+        print("\n[1/8] Loading existing bank...")
         all_correct, existing_incorrect = self.load_existing_bank()
 
         # 2. Bootstrap with probe failures if needed
         incorrect = list(existing_incorrect)
-        if len(incorrect) < self.target_size // 2:
-            print(f"\n[2/7] Bootstrapping: existing incorrect={len(incorrect)} "
-                  f"< {self.target_size//2} — running probe inference...")
+        if len(incorrect) < self.negative_target // 2:
+            print(f"\n[2/8] Bootstrapping: existing incorrect={len(incorrect)} "
+                  f"< {self.negative_target//2} — running probe inference...")
             probe_failures = self.generate_probe_failures(self.probe_size)
             incorrect.extend(probe_failures)
             print(f"   → Total incorrect candidates: {len(incorrect)}")
         else:
-            print(f"\n[2/7] Sufficient incorrect entries ({len(incorrect)}) — skipping probe bootstrap")
+            print(f"\n[2/8] Sufficient incorrect entries ({len(incorrect)}) — skipping probe bootstrap")
 
         if not incorrect:
             print("   ⚠️  No incorrect candidates available. Bank will contain only correct entries.")
 
         # 3. Label failure modes
-        print(f"\n[3/7] Labeling failure modes...")
+        print(f"\n[3/8] Labeling failure modes...")
         labeled_incorrect = self.label_failure_modes(incorrect)
 
         # 4. Build embedding cache for sharpness + redundancy (embed questions in bulk)
-        print(f"\n[4/7] Pre-embedding candidate questions for redundancy cache...")
+        print(f"\n[4/8] Pre-embedding candidate questions for redundancy cache...")
         if labeled_incorrect:
             q_texts = [e["Question"] for e in labeled_incorrect]
             q_embs = self.embed_texts_batch(q_texts)
             for e, emb in zip(labeled_incorrect, q_embs):
                 self._emb_cache[self._entry_id(e)] = emb
+        if all_correct:
+            q_texts_pos = [e["Question"] for e in all_correct]
+            q_embs_pos = self.embed_texts_batch(q_texts_pos)
+            for e, emb in zip(all_correct, q_embs_pos):
+                self._emb_cache[self._entry_id(e)] = emb
 
-        # 5. Greedy submodular selection
-        print(f"\n[5/7] Greedy submodular selection...")
-        selected = self.greedy_select(labeled_incorrect)
+        # 5. Greedy submodular selection (negatives)
+        print(f"\n[5/8] Greedy submodular selection (negative examples)...")
+        selected_negative = self.greedy_select(labeled_incorrect)
 
-        # 6. Build indexes (also writes bank.jsonl)
-        print(f"\n[6/7] Building forward + inverted indexes...")
-        forward_embs, inverted_embs = self.build_indexes(selected, all_correct)
+        # 6. Greedy submodular selection (positives)
+        print(f"\n[6/8] Greedy submodular selection (positive examples)...")
+        selected_positive = self.greedy_select_positive(all_correct)
 
-        # Load bank for FMAS (includes both selected + correct)
-        bank = selected + all_correct
+        # 7. Build indexes (also writes bank.jsonl)
+        print(f"\n[7/8] Building forward + inverted indexes...")
+        forward_embs, inverted_embs = self.build_indexes(selected_negative, selected_positive)
 
-        # 7. FMAS baseline
-        print(f"\n[7/7] Computing FMAS baseline...")
+        # Load bank for FMAS (includes both selected negative + selected positive)
+        bank = selected_negative + selected_positive
+
+        # 8. FMAS baseline
+        print(f"\n[8/8] Computing FMAS baseline...")
         self.compute_fmas_baseline(inverted_embs, bank, self.fmas_probe_size)
 
         # Write metadata
@@ -597,6 +699,9 @@ class SubmodularBankBuilder:
             "timestamp": datetime.now().isoformat(),
             "existing_bank_dir": str(self.existing_bank_dir),
             "target_size": self.target_size,
+            "positive_ratio": self.positive_ratio,
+            "positive_target": self.positive_target,
+            "negative_target": self.negative_target,
             "probe_size": self.probe_size,
             "alpha": self.alpha,
             "beta": self.beta,
@@ -607,9 +712,11 @@ class SubmodularBankBuilder:
             "generation": 1,
             "coverage_stats": {
                 "failure_modes_covered": len(set(
-                    e.get("failure_mode") for e in selected if e.get("failure_mode")
+                    e.get("failure_mode") for e in selected_negative if e.get("failure_mode")
                 )),
-                "calculators_covered": len(set(str(e["Calculator ID"]) for e in selected)),
+                "calculators_covered_negative": len(set(str(e["Calculator ID"]) for e in selected_negative)),
+                "calculators_covered_positive": len(set(str(e["Calculator ID"]) for e in selected_positive)),
+                "categories_covered_positive": len(set(str(e.get("Category", "")) for e in selected_positive if e.get("Category"))),
             },
         })
         meta_file = self.output_dir / "bank_metadata.json"
@@ -618,10 +725,11 @@ class SubmodularBankBuilder:
         print(f"\n✅ Bank construction complete!")
         print(f"   📁 Output: {self.output_dir}")
         print(f"   • Total entries: {len(bank)}")
-        print(f"   • Incorrect: {len(selected)}  |  Correct: {len(all_correct)}")
+        print(f"   • Negative (incorrect): {len(selected_negative)}  |  Positive (correct): {len(selected_positive)}")
         print(f"   • FMAS baseline: {self._metadata.get('fmas_baseline', 'N/A')}")
         print(f"   • Failure modes covered: {self._metadata['coverage_stats']['failure_modes_covered']}/5")
-        print(f"   • Calculators covered: {self._metadata['coverage_stats']['calculators_covered']}")
+        print(f"   • Calculators covered (neg): {self._metadata['coverage_stats']['calculators_covered_negative']}")
+        print(f"   • Calculators covered (pos): {self._metadata['coverage_stats']['calculators_covered_positive']}")
 
         return str(self.output_dir)
 
@@ -643,7 +751,10 @@ def main():
         "--output-dir", default=None,
         help="Output directory (default: ../outputs/seacr_bank_{timestamp})"
     )
-    parser.add_argument("--target-size", type=int, default=170)
+    parser.add_argument("--target-size", type=int, default=550,
+                        help="Total bank size (positive + negative, default: 550)")
+    parser.add_argument("--positive-ratio", type=float, default=0.45,
+                        help="Fraction of bank entries that are positive/correct (default: 0.45)")
     parser.add_argument(
         "--probe-size", type=int, default=60,
         help="Number of training examples to probe when incorrect pool is empty (default: 60)"
@@ -677,6 +788,7 @@ def main():
         train_csv_path=args.train_csv,
         output_dir=args.output_dir,
         target_size=args.target_size,
+        positive_ratio=args.positive_ratio,
         probe_size=args.probe_size,
         alpha=args.alpha,
         beta=args.beta,
