@@ -25,6 +25,7 @@ PROBE_SIZE=60
 TARGET_SIZE=100
 NUM_TEST_EXAMPLES=1047
 SEACR_ALPHA=0.8
+ARCHIVE_FLAG="--no-archive"   # default: tag utilities, never remove entries
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -37,6 +38,8 @@ while [[ $# -gt 0 ]]; do
     --target-size)    TARGET_SIZE="$2";          shift 2 ;;
     --num-examples)   NUM_TEST_EXAMPLES="$2";    shift 2 ;;
     --seacr-alpha)    SEACR_ALPHA="$2";          shift 2 ;;
+    --archive)        ARCHIVE_FLAG="--archive";  shift 1 ;;
+    --no-archive)     ARCHIVE_FLAG="--no-archive"; shift 1 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
@@ -120,23 +123,31 @@ fi
 # Stage 3: Lifecycle Update
 # ---------------------------------------------------------------------------
 echo ""
-echo "🗂  Stage 3: Lifecycle Update"
-REBUILD=$(python pipeline/bank_lifecycle_manager.py \
+echo "🗂  Stage 3: Lifecycle Update (${ARCHIVE_FLAG})"
+COVERAGE=$(python pipeline/bank_lifecycle_manager.py \
   --bank-dir "$BANK_DIR" \
   --eval-summary "$EVAL_DIR/evaluations/evaluation_summary.json" \
   --model-name "$MODEL" \
   --generation "$GENERATION" \
   --epsilon 0.05 \
   --fmas-threshold 0.15 \
-  --print-rebuild-flag)
+  $ARCHIVE_FLAG \
+  --print-coverage-warning)
 
 echo ""
-if [[ "$REBUILD" == "REBUILD" ]]; then
-  echo "⚠️  Bank rebuild recommended for next generation."
-  echo "   Omit --bank-dir on next run to trigger Stage 1."
+if [[ "$COVERAGE" == "WARN" ]]; then
+  echo "⚠️  Bank coverage warning — FMAS may be low or many entries have decayed utility."
+  echo "   The bank is unchanged (run with --archive to prune, or rebuild Stage 1)."
 else
-  echo "✅ Bank healthy. Pass --bank-dir $BANK_DIR to next run."
+  echo "✅ Bank coverage looks healthy for $MODEL."
 fi
+echo "   Pass --bank-dir $BANK_DIR to reuse this bank for the next generation."
+
+echo ""
+echo "📈 Cross-generation utility decay curve:"
+python pipeline/bank_lifecycle_manager.py \
+  --bank-dir "$BANK_DIR" \
+  --decay-curve-only 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Compare against baseline
