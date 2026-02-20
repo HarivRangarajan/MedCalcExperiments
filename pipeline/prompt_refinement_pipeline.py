@@ -451,16 +451,16 @@ Provide ONLY the refined prompt text. Do not include explanations or meta-commen
                     {"role": "system", "content": "You are an expert prompt engineer. Provide refined prompts based on performance feedback."},
                     {"role": "user", "content": instruction}
                 ],
-                "max_completion_tokens": 4000
+                "max_completion_tokens": 16000 if "gpt-5" in self.model.lower() else 4000
             }
-            
+
             # Only add temperature for non-GPT-5 models
             if "gpt-5" not in self.model.lower():
                 api_params["temperature"] = 0.7
-            
+
             response = self.client.chat.completions.create(**api_params)
-            
-            refined_prompt = response.choices[0].message.content.strip()
+
+            refined_prompt = (response.choices[0].message.content or "").strip()
 
             # Remove markdown code blocks if present (handles ```text, ```markdown, etc.)
             import re as _re
@@ -469,7 +469,7 @@ Provide ONLY the refined prompt text. Do not include explanations or meta-commen
             refined_prompt = refined_prompt.strip()
 
             if not refined_prompt:
-                print(f"   ⚠️  Refined prompt was empty after stripping, keeping current prompt")
+                print(f"   ⚠️  Refined prompt was empty (finish_reason={response.choices[0].finish_reason}), keeping current prompt")
                 return current_prompt
 
             return refined_prompt
@@ -639,7 +639,7 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
             
             response = self.client.chat.completions.create(**api_params)
             
-            unified_prompt = response.choices[0].message.content.strip()
+            unified_prompt = (response.choices[0].message.content or "").strip()
 
             # Remove markdown code blocks if present
             import re as _re
@@ -762,7 +762,7 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
             
             response = self.client.chat.completions.create(**api_params)
             
-            unified_prompt = response.choices[0].message.content.strip()
+            unified_prompt = (response.choices[0].message.content or "").strip()
 
             # Remove markdown code blocks if present
             import re as _re

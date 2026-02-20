@@ -96,7 +96,7 @@ if [[ -z "$REFINED_DIR" ]]; then
     --results-dir "$EXISTING_RESULTS_DIR" \
     --batch-size 20 \
     --max-iterations 5 \
-    --model gpt-5
+    --model gpt-4o
   REFINED_DIR=$(ls -td ../outputs/refined_prompts_* | head -n 1)
   echo "   ✓ Refined prompt: $REFINED_DIR"
 else
