@@ -461,8 +461,8 @@ class SubmodularBankBuilder:
     def _category_coverage(self, S: List[Dict]) -> float:
         """Fraction of distinct Category values represented in S."""
         all_cats = set(str(e.get("Category", "")) for e in S if e.get("Category"))
-        # MedCalc-Bench has ~10 categories; normalise by observed set
-        return min(1.0, len(all_cats) / 10)
+        # MedCalc-Bench has 7 categories; normalise by total count
+        return min(1.0, len(all_cats) / 7)
 
     def _positive_utility(self, S: List[Dict]) -> float:
         """Submodular utility for a set of positive (correct) examples."""

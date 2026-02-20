@@ -192,7 +192,7 @@ PositiveUtility(S_pos) = 0.45 · CalculatorCoverage(S_pos)
                        - 0.20 · Redundancy(S_pos)
 ```
 
-Where `CategoryCoverage(S_pos)` = fraction of ~10 MedCalc-Bench categories represented.
+Where `CategoryCoverage(S_pos)` = fraction of 7 MedCalc-Bench categories represented.
 If fewer correct candidates than positive_target, all are included without selection.
 
 **Greedy algorithm** (applied separately for negatives and positives):
