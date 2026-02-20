@@ -69,13 +69,13 @@ FMAS ≈ 0 → bank is stale for this model → trigger rebuild
 
 | Phase | File(s) | Status | Commit |
 |---|---|---|---|
-| 1 | Git setup + this doc | ✅ Done | `feat: init lifecycle-aware-contrastive-bank branch` |
-| 2 | `shared_utils.py` — `embed_texts_batch()` | ✅ Done | `feat(phase2): add embed_texts_batch() to shared_utils` |
-| 3 | `pipeline/seacr_retrieval.py` | ✅ Done | `feat(phase3): implement SEACRRetriever` |
-| 4 | `pipeline/submodular_bank_construction.py` | ✅ Done | `feat(phase4): implement SubmodularBankBuilder` |
-| 5 | `evaluate_contrastive_fewshot_method.py` (Changes A-E) | ✅ Done | `feat(phase5): wire SEACR into evaluator (changes A-E)` |
-| 6 | `pipeline/bank_lifecycle_manager.py` | ✅ Done | `feat(phase6): implement BankLifecycleManager` |
-| 7 | Shell scripts + `compare_baselines.py` | ✅ Done | `feat(phase7): orchestration scripts and analysis` |
+| 1 | Git setup + this doc | ✅ Done | `87ab599` |
+| 2 | `shared_utils.py` — `embed_texts_batch()` | ✅ Done | `68e1ae5` |
+| 3 | `pipeline/seacr_retrieval.py` | ✅ Done | `3acc028` |
+| 4 | `pipeline/submodular_bank_construction.py` | ✅ Done | `87da986` |
+| 5 | `evaluate_contrastive_fewshot_method.py` (Changes A-E) | ✅ Done | `f694709` |
+| 6 | `pipeline/bank_lifecycle_manager.py` | ✅ Done | `d048cc7` |
+| 7 | Shell scripts + `compare_baselines.py` | ✅ Done | `fa04d34` |
 
 ---
 
