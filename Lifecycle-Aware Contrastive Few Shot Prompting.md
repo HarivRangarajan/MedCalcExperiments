@@ -688,7 +688,7 @@ class BankLifecycleManager:
     """
     Manages demonstration bank lifecycle across model generations.
 
-    Computes U(d, g) = difficulty(d) × (1 - accuracy(g, calc(d))) for every bank entry
+    Computes polarity-aware U(d, g) for every bank entry (see compute_utility())
     and tags each entry with its utility for the current generation. The bank is NEVER
     automatically destroyed — it persists across model generations as a living record
     of demonstration utility decay. Archival is an optional, explicit action (--archive).
@@ -743,9 +743,10 @@ class BankLifecycleManager:
             Useful when the model needs guidance on a calculator it hasn't mastered.
             When accuracy → 1, the model no longer needs positive demonstrations → U → 0.
 
-        Negative entries:   U(d, g) = contrastive_sharpness(d) × (1 - accuracy(g, calc(d)))
-            Useful when the model makes errors that this example teaches against.
-            When accuracy → 1 or sharpness → 0, utility → 0.
+        Negative entries:   U(d, g) = (1 - contrastive_sharpness(d)) × (1 - accuracy(g, calc(d)))
+            Near-misses (low sharpness) have higher utility — consistent with bank
+            construction's ErrorProximitySharpness that favors near-misses.
+            When accuracy → 1 or sharpness → 1 (far apart), utility → 0.
 
         Returns float in [0, 1].
         """
@@ -757,8 +758,8 @@ class BankLifecycleManager:
         if is_positive:
             return 1.0 - accuracy
         else:
-            difficulty = float(entry.get("contrastive_sharpness", 0.5))
-            return difficulty * (1.0 - accuracy)
+            sharpness = float(entry.get("contrastive_sharpness", 0.5))
+            return (1.0 - sharpness) * (1.0 - accuracy)
 
     def update_generation(
         self,
@@ -1065,7 +1066,7 @@ evaluation_summary.json  ·  fmas_report.json
 bank_lifecycle_manager.py
   For each bank entry d:
     Positive: U(d, g) = 1.0 - accuracy(g, calc(d))
-    Negative: U(d, g) = contrastive_sharpness(d) × (1 - accuracy(g, calc(d)))
+    Negative: U(d, g) = (1 - contrastive_sharpness(d)) × (1 - accuracy(g, calc(d)))
   Tag U(d,g) in-place per generation (default --no-archive)
   If --archive: entries with U < 0.05 → archived/archived_gen{N}_{model}.jsonl
   if FMAS < 0.15 OR active_count < 30% original → print coverage warning

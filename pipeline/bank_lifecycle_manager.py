@@ -12,7 +12,7 @@ This manager does NOT destroy or rebuild the bank. Instead, after each
 model generation is evaluated (Stage 2), it:
 
   1. Loads the evaluation_summary.json (per-calculator accuracy + FMAS)
-  2. Computes U(d, g) = difficulty(d) × (1 - accuracy(g, calc(d))) for every entry
+  2. Computes polarity-aware U(d, g) for every entry (see compute_utility())
   3. Tags each bank entry in-place with its utility for this generation:
          entry["utility_by_generation"][model_name] = U
   4. Records FMAS and utility statistics in bank_metadata.json under the
@@ -32,8 +32,9 @@ Archival modes:
       for periodic bank pruning when you want to reduce bank size.
 
 Utility formula:
-    U(d, g) = difficulty(d) × (1 - accuracy(g, calc(d)))
-    difficulty(d) = contrastive_sharpness  (stored in bank entry)
+    Positive: U(d, g) = 1.0 - accuracy(g, calc(d))
+    Negative: U(d, g) = (1 - contrastive_sharpness(d)) × (1 - accuracy(g, calc(d)))
+    Near-misses (low sharpness) have higher utility — consistent with bank construction.
 
 Usage:
     # Observe cross-generation utility (bank unchanged):
@@ -135,8 +136,10 @@ class BankLifecycleManager:
         Polarity-aware utility:
 
         Negative entries:
-            U(d, g) = contrastive_sharpness(d) × (1 - accuracy(g, calc(d)))
-            High when model still fails on this calculator.
+            U(d, g) = (1 - contrastive_sharpness(d)) × (1 - accuracy(g, calc(d)))
+            Near-misses (low sharpness) have higher utility — consistent with
+            bank construction's ErrorProximitySharpness objective that favors
+            near-misses as more informative contrastive examples.
 
         Positive entries:
             U(d, g) = 1.0 - accuracy(g, calc(d))
@@ -154,8 +157,8 @@ class BankLifecycleManager:
         if is_positive:
             return 1.0 - accuracy
         else:
-            difficulty = float(entry.get("contrastive_sharpness", 0.5))
-            return difficulty * (1.0 - accuracy)
+            sharpness = float(entry.get("contrastive_sharpness", 0.5))
+            return (1.0 - sharpness) * (1.0 - accuracy)
 
     def _compute_all_utilities(
         self, eval_summary: Dict

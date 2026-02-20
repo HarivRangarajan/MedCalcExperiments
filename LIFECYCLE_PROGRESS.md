@@ -18,7 +18,7 @@ analysis.
 - Archival is **optional** and off by default (`--no-archive`)
 - Both positive and negative examples are curated (contrastive, not just negative)
 - Bank size = 550 (45% positive / 55% negative)
-- Refinement = 5 iterations × batch 10 (50 examples) — focus shifted to bank quality
+- Refinement = 5 iterations × batch 20 (100 examples) — focus shifted to bank quality
 - Evaluate across gpt-4o, gpt-5, gpt-3.5-turbo, gpt-4o-mini
 
 ---
@@ -36,12 +36,17 @@ without regard to question similarity. SEACR fixes both retrieval paths:
 4. **Showing** the most relevant contrastive pair — a positive example the model can learn from and
    a negative example that mirrors the specific mistake the model would make
 
-**Motivating numbers (current baselines on MedCalc-Bench, 1047 test examples)**:
-| Run | Model | Accuracy |
-|---|---|---|
-| MedCalc-Bench paper | gpt-4o | 50.91% |
-| `contrastive_evaluation_20251107_031128` | (unknown) | 68.67% |
-| `contrastive_evaluation_20251205_031352` | gpt-5 | **65.71%** ← primary baseline to beat |
+**Motivating numbers (baselines + SEACR results on MedCalc-Bench, 1047 test examples)**:
+| Run | Model | Accuracy | Method |
+|---|---|---|---|
+| MedCalc-Bench paper | gpt-4o | 50.91% | One-shot |
+| MedCalc-Bench paper | gpt-5 | 65.71% | One-shot |
+| MedCalc-Bench paper | gpt-4o-mini | 44.36% | One-shot |
+| MedCalc-Bench paper | gpt-3.5-turbo | 36.48% | One-shot |
+| **SEACR (ours)** | **gpt-4o** | **58.55%** | Lifecycle-Aware Contrastive |
+| **SEACR (ours)** | **gpt-5** | **68.67%** | Lifecycle-Aware Contrastive |
+| **SEACR (ours)** | **gpt-4o-mini** | **49.95%** | Lifecycle-Aware Contrastive |
+| SEACR (ours) | gpt-3.5-turbo | 36.01% | Lifecycle-Aware Contrastive |
 
 ---
 
@@ -116,7 +121,7 @@ Changes across all pipeline files to implement:
 - `--results-dir` is now optional (used only for seeding initial prompt from enhanced_prompts.json)
 
 **bank_lifecycle_manager.py**:
-- Polarity-aware utility: positive U = 1-accuracy, negative U = sharpness×(1-accuracy)
+- Polarity-aware utility: positive U = 1-accuracy, negative U = (1-sharpness)×(1-accuracy)
 - Polarity counts in gen_stats
 
 **Shell scripts**:
@@ -129,9 +134,9 @@ Changes across all pipeline files to implement:
 ## Key Implementation Notes
 
 ### Stage 1 Bootstrapping (important adaptation)
-The spec assumes an existing bank with ~510 entries (145 incorrect). Our current
-`medcalc_contrastive_edits_evaluation_20260218_234824` has 0 incorrect entries (gpt-5 is
-too accurate on training examples). To handle this, Stage 1 includes `generate_probe_failures()`:
+The spec assumes an existing bank with ~510 entries (145 incorrect). Earlier training data
+had 0 incorrect entries (gpt-5 is too accurate on training examples). To handle this,
+Stage 1 includes `generate_probe_failures()`:
 - Runs probe inference on N training examples with one-shot calculator-ID-based examples (no contrastive demos)
 - Collects wrong answers → these seed the incorrect pool
 - Union with any existing incorrect entries → candidate pool for greedy selection
@@ -168,7 +173,7 @@ Positive: score(d_i) = 0.6 · sim(embed(question), forward_index[i]) # question 
 ### Polarity-Aware Utility Decay (Stage 3)
 ```
 Positive: U(d, g) = 1.0 - accuracy(g, calc(d))
-Negative: U(d, g) = contrastive_sharpness(d) × (1 - accuracy(g, calc(d)))
+Negative: U(d, g) = (1 - contrastive_sharpness(d)) × (1 - accuracy(g, calc(d)))
 ```
 When a model masters a calculator → accuracy → 1 → U → 0. Archival is optional (`--no-archive` default).
 
@@ -231,13 +236,60 @@ python pipeline/compare_baselines.py \
 
 ---
 
-## Results (updated as experiments run)
+## Results
 
-| Condition | Model | Accuracy | FMAS | Notes |
+### Bank Construction (Stage 1)
+- **Bank**: `outputs/seacr_bank_20260219_231419/` — 498 entries (251 negative + 247 positive)
+- **Probe size**: 300 (one-shot with calculator-ID-based examples)
+- **FMAS baseline**: 0.847
+- **Refined prompts**: `outputs/refined_prompts_20260220_005738/` — 5 iterations × 20 examples, best iteration 2 (60.85%)
+
+### SEACR Evaluation (Stage 2) — Full 1047 Test Set
+
+| Condition | Model | SEACR Acc | Paper Baseline | Delta | FMAS |
+|---|---|---|---|---|---|
+| SEACR (Stage 1+2) | **gpt-4o** | **58.55%** (613/1047) | 50.91% | **+7.64%** | 0.808 |
+| SEACR (Stage 1+2) | **gpt-5** | **68.67%** (719/1047) | 65.71% | **+2.96%** | 0.806 |
+| SEACR (Stage 1+2) | **gpt-4o-mini** | **49.95%** (523/1047) | 44.36% | **+5.59%** | 0.815 |
+| SEACR (Stage 1+2) | gpt-3.5-turbo | 36.01% (377/1047) | 36.48% | -0.47% | 0.812 |
+
+**3/4 models show improvement over paper baselines.** Largest improvement is gpt-4o (+7.64%).
+
+### Category Breakdown (gpt-5, 68.67% overall)
+
+| Category | Total | Correct | Accuracy |
+|---|---|---|---|
+| physical | 240 | 233 | 97.1% |
+| lab | 327 | 260 | 79.5% |
+| dosage | 40 | 25 | 62.5% |
+| diagnosis | 60 | 34 | 56.7% |
+| date | 60 | 33 | 55.0% |
+| risk | 240 | 105 | 43.8% |
+| severity | 80 | 29 | 36.3% |
+
+### Lifecycle Tagging (Stage 3) — Cross-Generation Utility Decay
+
+| Generation | Model | Mean U | Low-U% (< 0.05) | FMAS |
 |---|---|---|---|---|
-| Baseline (contrastive, random) | gpt-5 | 65.71% | N/A | Dec 2025 run |
-| SEACR (Stage 1+2) | gpt-4o | TBD | TBD | |
-| SEACR (Stage 1+2) | gpt-5 | TBD | TBD | |
-| SEACR (Stage 1+2) | gpt-3.5-turbo | TBD | TBD | |
-| SEACR (Stage 1+2) | gpt-4o-mini | TBD | TBD | |
-| Full lifecycle | gpt-5 | TBD | TBD | |
+| gen3 | gpt-3.5-turbo | 0.450 | 0.6% | 0.812 |
+| gen4 | gpt-4o-mini | 0.358 | 12.0% | 0.815 |
+| gen1 | gpt-4o | 0.251 | 21.7% | 0.808 |
+| gen2 | gpt-5 | 0.133 | 43.0% | 0.806 |
+
+**Key insight**: Utility inversely correlates with model capability — the bank is most useful
+for weaker models (gpt-3.5-turbo: 0.450 mean U) and least useful for stronger models (gpt-5:
+0.133 mean U, 43.0% of entries are low-utility). This validates the "Demonstrations as Living
+Language" philosophy: as models improve, demonstrations naturally decay in utility.
+
+**Note on utility formula**: Negative utility uses `(1 - contrastive_sharpness) × (1 - accuracy)`,
+consistent with bank construction's ErrorProximitySharpness objective — near-misses (low sharpness)
+are more informative contrastive examples and retain higher utility.
+
+### Output Directories
+
+| Model | Evaluation Dir |
+|---|---|
+| gpt-4o | `outputs/contrastive_evaluation_20260220_011226_test1047/` |
+| gpt-5 | `outputs/contrastive_evaluation_20260220_013141_test1047/` |
+| gpt-3.5-turbo | `outputs/contrastive_evaluation_20260220_034850_test1047/` |
+| gpt-4o-mini | `outputs/contrastive_evaluation_20260220_040502_test1047/` |

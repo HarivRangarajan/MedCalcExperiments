@@ -46,14 +46,15 @@ class ContrastiveFewShotEvaluator:
                  training_results_dir: str,
                  output_dir: str = None,
                  num_test_examples: int = None,
-                 num_positive: int = 1,
-                 num_negative: int = 1,
+                 num_positive: int = 5,
+                 num_negative: int = 5,
                  batch_size: int = 10,
                  save_frequency: int = 50,
                  model: str = "gpt-4o",
                  seacr_bank_dir: str = None,
                  seacr_alpha: float = 0.8,
-                 seacr_beta_pos: float = 0.6):
+                 seacr_beta_pos: float = 0.6,
+                 duplicate_prompt: bool = False):
         """
         Initialize the evaluator.
         
@@ -80,7 +81,8 @@ class ContrastiveFewShotEvaluator:
         self.num_negative = num_negative
         self.batch_size = batch_size
         self.save_frequency = save_frequency
-        
+        self.duplicate_prompt = duplicate_prompt
+
         if output_dir is None:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             suffix = f"_test{num_test_examples}" if num_test_examples else ""
@@ -418,6 +420,9 @@ class ContrastiveFewShotEvaluator:
                             system_msg += f'Incorrect LLM Answer: {ex["LLM Answer"]}\n'
                             system_msg += f'Correct Answer Should Be: {ex["Ground Truth Answer"]}\n'
                     user_msg = f'Here is the patient note:\n\n{patient_note}\n\nHere is the task:\n\n{question}\n\nPlease directly output the JSON dict with your step-by-step thinking and final answer.'
+                    # Duplicate prompt for reinforcement if enabled
+                    if self.duplicate_prompt:
+                        system_msg = system_msg + "\n\n---\n\n" + system_msg
                 else:
                     # Fallback: existing Calculator ID → random.sample() path (baseline)
                     system_msg, user_msg = self.create_contrastive_few_shot_prompt(
@@ -804,15 +809,15 @@ def main():
     parser.add_argument(
         '--num-positive',
         type=int,
-        default=1,
-        help='Number of positive contrastive examples (default: 1)'
+        default=5,
+        help='Number of positive contrastive examples (default: 5)'
     )
     
     parser.add_argument(
         '--num-negative',
         type=int,
-        default=1,
-        help='Number of negative contrastive examples (default: 1)'
+        default=5,
+        help='Number of negative contrastive examples (default: 5)'
     )
     
     parser.add_argument(
@@ -863,6 +868,12 @@ def main():
         default=None,
         help='Comma-separated list of models to evaluate (e.g., "gpt-4o,gpt-5,gpt-3.5-turbo,gpt-4o-mini"). '
              'When set, runs full evaluation for each model with separate output dirs.'
+    )
+
+    parser.add_argument(
+        '--duplicate-prompt',
+        action='store_true',
+        help='Duplicate the full system prompt (instructions + examples) for reinforcement.'
     )
 
     parser.add_argument(
@@ -921,7 +932,8 @@ def main():
             model=model_name,
             seacr_bank_dir=args.seacr_bank_dir,
             seacr_alpha=args.seacr_alpha,
-            seacr_beta_pos=args.seacr_beta_pos
+            seacr_beta_pos=args.seacr_beta_pos,
+            duplicate_prompt=args.duplicate_prompt
         )
 
         results = evaluator.run_complete_evaluation(

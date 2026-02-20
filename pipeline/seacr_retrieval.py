@@ -107,8 +107,8 @@ class SEACRRetriever:
         probe_prediction: str,
         calculator_id: str,
         client: OpenAI,
-        num_positive: int = 1,
-        num_negative: int = 1,
+        num_positive: int = 5,
+        num_negative: int = 5,
     ) -> Tuple[List[Dict], List[Dict]]:
         """
         Retrieve contrastive pair using SEACR.
