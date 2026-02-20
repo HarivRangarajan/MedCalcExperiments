@@ -10,17 +10,13 @@ ContrastiveFewShotEvaluator.get_contrastive_examples() with
 error-anchored retrieval using a precomputed inverted index
 of wrong answers.
 
-Key idea:
-    The model is first probed without demonstrations (probe inference).
-    The probe prediction is embedded and matched against an inverted
-    index of known wrong answers from the bank. The bank entry whose
-    wrong answer most closely resembles the probe prediction is selected
-    as the negative demonstration — because that is the mistake this
-    specific model is most likely to make on this type of question.
-
-Retrieval formula:
+Negative retrieval (error-anchored):
     score(d_i) = alpha * sim(embed(probe_prediction), inverted_index[i])
                + (1-alpha) * sim(embed(question), forward_index[i])
+
+Positive retrieval (smart):
+    score(d_i) = beta_pos * sim(embed(question), forward_embs[i])
+               + (1-beta_pos) * calculator_match(calculator_id, d_i)
 
 FMAS (Failure Mode Alignment Score):
     FMAS = E[max_{d in bank} sim(embed(probe), embed(d.LLM_Answer))]
@@ -44,15 +40,18 @@ class SEACRRetriever:
     pipeline/evaluate_contrastive_fewshot_method.py:169-205.
     """
 
-    def __init__(self, bank_dir: str, alpha: float = 0.8):
+    def __init__(self, bank_dir: str, alpha: float = 0.8, beta_pos: float = 0.6):
         """
         Args:
-            bank_dir: Path to seacr_bank_* directory from Stage 1.
-            alpha: Weight on the error-anchoring term. (1-alpha) goes to question-matching.
-                   0.8 recommended. 1.0 = pure error-anchoring, 0.0 = pure question-matching.
+            bank_dir:  Path to seacr_bank_* directory from Stage 1.
+            alpha:     Weight on the error-anchoring term for negative retrieval.
+                       (1-alpha) goes to question-matching. 0.8 recommended.
+            beta_pos:  Weight on question-similarity for positive retrieval.
+                       (1-beta_pos) goes to calculator-match bonus. 0.6 recommended.
         """
         self.bank_dir = Path(bank_dir)
         self.alpha = alpha
+        self.beta_pos = beta_pos
 
         # Load all bank entries
         self.bank: List[Dict] = []
@@ -66,22 +65,29 @@ class SEACRRetriever:
         self.forward_embs: np.ndarray = fwd["embeddings"]    # shape (N, 1536)
         self.inverted_embs: np.ndarray = inv["embeddings"]   # shape (N, 1536)
 
-        # Build lookup: calculator_id -> list of bank indices (correct entries only)
-        self.correct_index: Dict[str, List[int]] = {}
+        # Build indices using polarity field (with backward compat for Result field)
+        self.positive_indices: List[int] = []
+        self.incorrect_indices: List[int] = []
+        self.correct_index: Dict[str, List[int]] = {}  # calculator_id -> positive indices
+
         for i, entry in enumerate(self.bank):
-            if entry["Result"] == "Correct":
+            polarity = entry.get("polarity")
+            result = entry.get("Result", "")
+
+            is_positive = (polarity == "positive") or (polarity is None and result == "Correct")
+            is_negative = (polarity == "negative") or (polarity is None and result == "Incorrect")
+
+            if is_positive:
+                self.positive_indices.append(i)
                 cid = str(entry["Calculator ID"])
                 self.correct_index.setdefault(cid, []).append(i)
-
-        # Indices into self.bank for incorrect entries (for inverted retrieval)
-        self.incorrect_indices: List[int] = [
-            i for i, e in enumerate(self.bank) if e["Result"] == "Incorrect"
-        ]
+            elif is_negative:
+                self.incorrect_indices.append(i)
 
         print(f"✅ SEACRRetriever loaded: {len(self.bank)} total entries, "
-              f"{len(self.incorrect_indices)} incorrect, "
-              f"{len(self.bank) - len(self.incorrect_indices)} correct, "
-              f"alpha={alpha}")
+              f"{len(self.incorrect_indices)} negative, "
+              f"{len(self.positive_indices)} positive, "
+              f"alpha={alpha}, beta_pos={beta_pos}")
 
     def _embed_text(self, text: str, client: OpenAI) -> np.ndarray:
         """Embed one string. Returns shape (1536,). Truncates at 8000 chars."""
@@ -107,14 +113,15 @@ class SEACRRetriever:
         """
         Retrieve contrastive pair using SEACR.
 
-        Negative (incorrect) retrieval — the novel part:
+        Negative (incorrect) retrieval — error-anchored:
             score(d_i) = alpha * sim(embed(probe_prediction), inverted_index[i])
                        + (1-alpha) * sim(embed(question), forward_index[i])
             Search is restricted to self.incorrect_indices only.
 
-        Positive (correct) retrieval — same as baseline:
-            Filter by calculator_id, then random.choice.
-            The novel contribution is entirely in the negative (error-anchored) retrieval.
+        Positive (correct) retrieval — smart:
+            score(d_i) = beta_pos * sim(embed(question), forward_embs[i])
+                       + (1-beta_pos) * calculator_match(calculator_id, d_i)
+            Search is restricted to self.positive_indices only.
 
         Args:
             question:          current test question text (from test_data.csv)
@@ -127,10 +134,12 @@ class SEACRRetriever:
         Returns:
             Tuple (positive_examples, negative_examples), each a list of bank entry dicts
         """
+        # Embed question once (used by both negative and positive retrieval)
+        question_emb = self._embed_text(question, client)
+
         # --- Negative retrieval via inverted index ---
         if self.incorrect_indices:
-            probe_emb    = self._embed_text(probe_prediction, client)
-            question_emb = self._embed_text(question, client)
+            probe_emb = self._embed_text(probe_prediction, client)
 
             inc_inv = self.inverted_embs[self.incorrect_indices]   # (M, 1536)
             inc_fwd = self.forward_embs[self.incorrect_indices]    # (M, 1536)
@@ -146,15 +155,22 @@ class SEACRRetriever:
         else:
             negative_examples = []
 
-        # --- Positive retrieval via Calculator ID (unchanged from baseline) ---
-        available_pos = self.correct_index.get(str(calculator_id), [])
-        if available_pos:
-            chosen = np.random.choice(
-                available_pos,
-                size=min(num_positive, len(available_pos)),
-                replace=False
-            ).tolist()
-            positive_examples = [self.bank[i] for i in chosen]
+        # --- Smart positive retrieval ---
+        if self.positive_indices:
+            pos_fwd = self.forward_embs[self.positive_indices]  # (P, 1536)
+            q_scores = self._cosine_sim_many(question_emb, pos_fwd)  # (P,)
+
+            # Calculator-match bonus: 1.0 if same calculator, 0.0 otherwise
+            calc_bonus = np.array([
+                1.0 if str(self.bank[i].get("Calculator ID")) == str(calculator_id) else 0.0
+                for i in self.positive_indices
+            ], dtype=np.float32)
+
+            pos_composite = self.beta_pos * q_scores + (1 - self.beta_pos) * calc_bonus
+            top_pos_local = np.argsort(-pos_composite)[:num_positive]
+            positive_examples = [
+                self.bank[self.positive_indices[i]] for i in top_pos_local
+            ]
         else:
             positive_examples = []
 
