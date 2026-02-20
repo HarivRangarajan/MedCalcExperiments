@@ -3,6 +3,19 @@
 **Paper Title**: *Lifecycle-Aware Contrastive Few-Shot Prompting*
 **Status**: Implementation-ready specification
 
+### Core Philosophy: Demonstrations as Living Language
+
+The contrastive demonstration bank is built **once** using a previous model (default: gpt-4o)
+and **reused across model generations** without rebuilding. FMAS scores are tagged per-generation
+in Stage 3, enabling cross-generation utility decay analysis. The bank contains **both positive
+(correct) and negative (incorrect) examples**, curated via separate submodular objectives.
+
+Archival is **optional** and off by default (`--no-archive`). When enabled (`--archive`), low-utility
+entries are physically removed. Otherwise, utilities are tagged in-place for analysis.
+
+**Key parameters**: Bank size = 550 (45% positive, 55% negative). Refinement = 5 iterations × batch 10 (50 examples).
+Evaluation across: gpt-4o, gpt-5, gpt-3.5-turbo, gpt-4o-mini.
+
 ---
 
 ## 0. Current Pipeline Map (Baseline)
@@ -26,8 +39,8 @@ outputs/medcalc_contrastive_edits_evaluation_*/
       |
       v
 pipeline/prompt_refinement_pipeline.py
-      |  Refiner: gpt-5 rewrites unified_prompt.txt over 34 iterations
-      |  Evaluator (hardcoded line 197): gpt-4o re-evaluates on 170 training examples
+      |  Refiner: gpt-5 rewrites unified_prompt.txt over 5 iterations (batch_size=10, 50 examples)
+      |  Evaluator (hardcoded line 197): gpt-4o re-evaluates on training examples
       |
       v
 outputs/refined_prompts_*/final/unified_prompt.txt
@@ -58,10 +71,10 @@ if len(available_negative) >= num_negative:
 ## 1. Three-Stage Architecture
 
 ```
-Stage 1: Bank Construction (runs once, offline)
+Stage 1: Bank Construction (runs ONCE using gpt-4o, reused across generations)
   pipeline/submodular_bank_construction.py
   → outputs/seacr_bank_{timestamp}/
-      bank.jsonl           (enriched examples with failure_mode + sharpness fields)
+      bank.jsonl           (positive + negative entries with polarity, failure_mode, sharpness)
       embeddings.npz       (forward index: question embeddings, shape N×1536)
       inverted_index.npz   (inverted index: wrong-answer embeddings, shape N×1536)
       bank_metadata.json   (coverage stats, FMAS baseline, generation history)
@@ -74,7 +87,7 @@ Stage 2: SEACR Retrieval (replaces get_contrastive_examples at inference time)
 Stage 3: Lifecycle Management (runs after each model generation evaluation)
   pipeline/bank_lifecycle_manager.py
   → outputs/seacr_bank_{timestamp}/archived/   (retired examples per generation)
-  → triggers re-run of Stage 1 when FMAS < threshold
+  → tags U(d,g) per generation in bank entries; archives entries only when --archive is set
 ```
 
 ---
@@ -83,9 +96,11 @@ Stage 3: Lifecycle Management (runs after each model generation evaluation)
 
 ### 2.1 New file: `pipeline/submodular_bank_construction.py`
 
-**Purpose**: Replace the current random-170 sample with a principled greedy selection from
-the full 10k train set that maximizes coverage across failure modes, calculators, and
-error-proximity sharpness.
+**Purpose**: Replace the current random sample with a principled greedy selection of BOTH
+positive (correct) and negative (incorrect) examples from the candidate pool, maximizing
+coverage across failure modes, calculators, categories, and error-proximity sharpness.
+Bank size = 550 (45% positive, 55% negative). The bank is built once with gpt-4o and
+reused across model generations.
 
 **Inputs**:
 - `MedCalc-Bench/dataset/train_data.csv` (10,053 rows)
@@ -107,26 +122,30 @@ Patient Note, Question, LLM Answer, LLM Explanation,
 Ground Truth Answer, Ground Truth Explanation, Result, Prompt Type
 ```
 
-The enriched schema adds three new fields:
+The enriched schema adds four new fields:
 ```json
 {
   "...all existing fields unchanged...",
+  "polarity": "positive | negative",
   "failure_mode": "arithmetic | unit_conversion | input_extraction | formula_selection | threshold_boundary",
   "contrastive_sharpness": 0.73,
   "generation": 1
 }
 ```
 
-- `failure_mode`: assigned by a one-time LLM labeling pass (see §2.1.3). Null for correct examples.
+- `polarity`: "positive" for correct examples, "negative" for incorrect examples. Determines which
+  retrieval path (error-anchored or question-similarity) is used and which utility formula applies.
+- `failure_mode`: assigned by a one-time LLM labeling pass (see §2.1.3). Null for positive entries.
 - `contrastive_sharpness`: `1.0 - cosine_sim(embed(LLM_Answer), embed(Ground_Truth_Answer))`.
   High value = wrong and correct answer are far apart in embedding space (easy contrast).
-  Low value = near-miss (harder to distinguish, more informative). Applies to incorrect entries only.
-- `generation`: integer starting at 1, incremented by Stage 3 when bank is rebuilt after model generation advances.
+  Low value = near-miss (harder to distinguish, more informative). Applies to negative entries only.
+- `generation`: integer starting at 1.
 
 #### 2.1.2 Submodular objective
 
-Select set S ⊆ CandidatePool (all 510 existing incorrect examples from the bank, plus any
-new examples generated via probe inference on the wider 10k pool) such that |S| = K (default K=170):
+**Negative selection**: Select set S_neg ⊆ CandidatePool (existing incorrect entries from the bank,
+plus new incorrect examples generated via probe inference on the wider 10k train pool) such that
+|S_neg| = negative_target (default: 302 = 550 × 0.55):
 
 ```
 Utility(S) = α · FailureModeCoverage(S)
@@ -164,7 +183,19 @@ The 0.9 floor means only very high similarity pairs are penalized.
 
 **Defaults**: `α=0.35, β=0.35, γ=0.20, δ=0.10`. All exposed as CLI args.
 
-**Greedy algorithm**:
+**Positive selection**: Select set S_pos ⊆ CorrectPool such that |S_pos| = positive_target
+(default: 248 = 550 × 0.45):
+
+```
+PositiveUtility(S_pos) = 0.45 · CalculatorCoverage(S_pos)
+                       + 0.35 · CategoryCoverage(S_pos)
+                       - 0.20 · Redundancy(S_pos)
+```
+
+Where `CategoryCoverage(S_pos)` = fraction of ~10 MedCalc-Bench categories represented.
+If fewer correct candidates than positive_target, all are included without selection.
+
+**Greedy algorithm** (applied separately for negatives and positives):
 ```python
 S = []
 candidates = all_incorrect_examples   # pre-embedded
@@ -177,8 +208,8 @@ while len(S) < target_size:
                 best_gain, best_d = gain, d
     S.append(best_d)
 ```
-For N=510 candidates and K=170, this runs O(N·K) = ~87k iterations, each doing constant-time
-lookups with precomputed embeddings. Runs in seconds on CPU.
+For N candidates and K=550, this runs O(N·K) iterations, each doing constant-time
+lookups with precomputed embeddings. Runs in seconds to low minutes on CPU.
 
 #### 2.1.3 Failure mode labeling pass
 
@@ -219,7 +250,8 @@ class SubmodularBankBuilder:
         existing_bank_dir: str,   # outputs/medcalc_contrastive_edits_evaluation_*/
         train_csv_path: str,      # MedCalc-Bench/dataset/train_data.csv
         output_dir: str,          # outputs/seacr_bank_{timestamp}/
-        target_size: int = 170,
+        target_size: int = 550,
+        positive_ratio: float = 0.45,  # 45% positive, 55% negative
         alpha: float = 0.35,
         beta: float = 0.35,
         gamma: float = 0.20,
@@ -256,17 +288,23 @@ class SubmodularBankBuilder:
         ...
 
     def greedy_select(self, labeled_incorrect: List[Dict]) -> List[Dict]:
-        """Main greedy submodular loop. Returns selected list of size target_size.
+        """Greedy submodular loop for negatives. Returns list of size negative_target.
         Pre-embeds all candidates before the loop to avoid repeated API calls."""
         ...
 
+    def greedy_select_positive(self, all_correct: List[Dict]) -> List[Dict]:
+        """Greedy submodular loop for positives. Returns list of size positive_target.
+        Objective: 0.45·CalculatorCoverage + 0.35·CategoryCoverage - 0.20·Redundancy.
+        If fewer candidates than positive_target, returns all without selection."""
+        ...
+
     def build_indexes(
-        self, selected: List[Dict], all_correct: List[Dict]
+        self, selected_negative: List[Dict], selected_positive: List[Dict]
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Build and save forward + inverted indexes.
-        Bank = selected (incorrect) + all_correct examples (for positive retrieval).
+        Bank = selected_negative + selected_positive, each stamped with polarity field.
         - Forward index: embed(Question) for all entries
-        - Inverted index: embed(LLM_Answer) for incorrect entries; zeros for correct entries
+        - Inverted index: embed(LLM_Answer) for negative entries; zeros for positive entries
         Saves bank.jsonl, embeddings.npz, inverted_index.npz.
         Returns (forward_embs, inverted_embs)."""
         ...
@@ -281,14 +319,15 @@ class SubmodularBankBuilder:
 
     def run(self) -> str:
         """Orchestrates all steps. Returns path to output_dir."""
-        # 1. Load existing bank
-        # 2. Label failure modes (async, batched)
+        # 1. Load existing bank (correct + incorrect entries)
+        # 2. Label failure modes (async, batched) — incorrect entries only
         # 3. Compute contrastive_sharpness for each incorrect entry
         # 4. Embed all questions and answers in bulk
-        # 5. Greedy submodular selection
-        # 6. Build forward + inverted indexes
-        # 7. Compute FMAS baseline
-        # 8. Write bank_metadata.json
+        # 5. Greedy submodular selection — negatives (target: 302)
+        # 6. Greedy submodular selection — positives (target: 248)
+        # 7. Build forward + inverted indexes (stamp polarity field)
+        # 8. Compute FMAS baseline
+        # 9. Write bank_metadata.json
         ...
 ```
 
@@ -296,16 +335,18 @@ class SubmodularBankBuilder:
 
 ```bash
 python pipeline/submodular_bank_construction.py \
-  --existing-bank-dir ../outputs/medcalc_contrastive_edits_evaluation_20251010_054434 \
+  --existing-bank-dir ../outputs/medcalc_contrastive_edits_evaluation_20260218_234824 \
   --train-csv MedCalc-Bench/dataset/train_data.csv \
-  --target-size 170 \
+  --target-size 550 \
+  --positive-ratio 0.45 \
   --alpha 0.35 --beta 0.35 --gamma 0.20 --delta 0.10 \
   --labeling-model gpt-4o \
+  --inference-model gpt-4o \
   --output-dir ../outputs/seacr_bank_$(date +%Y%m%d_%H%M%S)
 ```
 
-Stage 1 runs **once per model generation**, not per evaluation. The bank it produces is
-reused across all test runs for that generation.
+Stage 1 runs **once** using gpt-4o. The bank it produces is reused across all model
+generations (gpt-4o, gpt-5, gpt-3.5-turbo, gpt-4o-mini) without rebuilding.
 
 ---
 
@@ -315,136 +356,71 @@ reused across all test runs for that generation.
 
 **Purpose**: Self-contained retrieval module. Loads the bank from Stage 1 and exposes a
 `retrieve()` method that replaces `get_contrastive_examples()` in the evaluator.
+Both positive and negative retrieval are embedding-based and principled.
 
 ```python
-import numpy as np
-import json
-from pathlib import Path
-from openai import OpenAI
-from typing import Dict, List, Tuple, Optional
-
-
 class SEACRRetriever:
     """
     Self-Error-Anchored Contrastive Retrieval.
-
-    Replaces the Calculator ID → random.sample() logic in
-    ContrastiveFewShotEvaluator.get_contrastive_examples() at
-    pipeline/evaluate_contrastive_fewshot_method.py:169-205.
+    Replaces Calculator ID → random.sample() with embedding-based retrieval
+    for BOTH positive and negative examples.
     """
 
-    def __init__(self, bank_dir: str, alpha: float = 0.8):
+    def __init__(self, bank_dir: str, alpha: float = 0.8, beta_pos: float = 0.6):
         """
         Args:
-            bank_dir: Path to seacr_bank_* directory from Stage 1.
-            alpha: Weight on the error-anchoring term. (1-alpha) goes to question-matching.
-                   0.8 recommended. 1.0 = pure error-anchoring, 0.0 = pure question-matching.
+            bank_dir:  Path to seacr_bank_* directory from Stage 1.
+            alpha:     Error-anchoring weight for negative retrieval (default 0.8).
+            beta_pos:  Question-similarity weight for positive retrieval (default 0.6).
         """
-        self.bank_dir = Path(bank_dir)
-        self.alpha = alpha
-
-        # Load all bank entries
-        self.bank: List[Dict] = []
-        with open(self.bank_dir / "bank.jsonl") as f:
-            for line in f:
-                self.bank.append(json.loads(line))
-
-        # Load precomputed embeddings
-        fwd = np.load(self.bank_dir / "embeddings.npz")
-        inv = np.load(self.bank_dir / "inverted_index.npz")
-        self.forward_embs: np.ndarray = fwd["embeddings"]    # shape (N, 1536)
-        self.inverted_embs: np.ndarray = inv["embeddings"]   # shape (N, 1536)
-
-        # Build lookup: calculator_id -> list of bank indices (correct entries only)
-        self.correct_index: Dict[str, List[int]] = {}
-        for i, entry in enumerate(self.bank):
-            if entry["Result"] == "Correct":
-                cid = entry["Calculator ID"]
-                self.correct_index.setdefault(cid, []).append(i)
-
-        # Indices into self.bank for incorrect entries (for inverted retrieval)
-        self.incorrect_indices: List[int] = [
-            i for i, e in enumerate(self.bank) if e["Result"] == "Incorrect"
-        ]
-
-        print(f"✅ SEACRRetriever loaded: {len(self.bank)} total entries, "
-              f"{len(self.incorrect_indices)} incorrect, alpha={alpha}")
-
-    def _embed_text(self, text: str, client: OpenAI) -> np.ndarray:
-        """Embed one string. Returns shape (1536,). Truncates at 8000 chars."""
-        resp = client.embeddings.create(model="text-embedding-3-small", input=text[:8000])
-        return np.array(resp.data[0].embedding, dtype=np.float32)
-
-    def _cosine_sim_many(self, query: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """Cosine similarity between query (1536,) and every row of matrix (M, 1536).
-        Returns shape (M,)."""
-        q = query / (np.linalg.norm(query) + 1e-10)
-        norms = np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-10
-        return (matrix / norms) @ q
+        # Loads bank.jsonl, embeddings.npz, inverted_index.npz
+        # Builds positive_indices and incorrect_indices using polarity field
+        # (backward compat: falls back to Result field if polarity is absent)
+        ...
 
     def retrieve(
-        self,
-        question: str,
-        probe_prediction: str,
-        calculator_id: str,
-        client: OpenAI,
-        num_positive: int = 1,
-        num_negative: int = 1,
+        self, question, probe_prediction, calculator_id, client,
+        num_positive=1, num_negative=1
     ) -> Tuple[List[Dict], List[Dict]]:
         """
-        Retrieve contrastive pair using SEACR.
+        Negative (incorrect) retrieval — error-anchored:
+            score(d_i) = alpha · sim(embed(probe_prediction), inverted_index[i])
+                       + (1-alpha) · sim(embed(question), forward_index[i])
+            Restricted to entries with polarity == "negative".
 
-        Negative (incorrect) retrieval — the novel part:
-            score(d_i) = alpha * sim(embed(probe_prediction), inverted_index[i])
-                       + (1-alpha) * sim(embed(question), forward_index[i])
-            Search is restricted to self.incorrect_indices only.
-
-        Positive (correct) retrieval — same as baseline:
-            Filter by calculator_id, then random.choice.
-            Rationale: correct examples should match the same calculator type.
-            The novel contribution is entirely in the negative (error-anchored) retrieval.
-
-        Args:
-            question:          current test question text (from test_data.csv)
-            probe_prediction:  model's output from the probe inference step (no demonstrations)
-            calculator_id:     string calculator ID for this test example (e.g. "38")
-            client:            synchronous OpenAI client for embedding calls
-            num_positive:      number of correct demonstrations to return
-            num_negative:      number of incorrect demonstrations to return
+        Positive (correct) retrieval — smart embedding-based:
+            score(d_i) = beta_pos · sim(embed(question), forward_index[i])
+                       + (1-beta_pos) · calculator_match(calculator_id, d_i)
+            Restricted to entries with polarity == "positive".
+            calculator_match = 1.0 if same calculator, 0.0 otherwise.
 
         Returns:
-            Tuple (positive_examples, negative_examples), each a list of bank entry dicts
+            Tuple (positive_examples, negative_examples)
         """
+        question_emb = self._embed_text(question, client)
+
         # --- Negative retrieval via inverted index ---
         if self.incorrect_indices:
-            probe_emb    = self._embed_text(probe_prediction, client)
-            question_emb = self._embed_text(question, client)
-
-            inc_inv = self.inverted_embs[self.incorrect_indices]   # (M, 1536)
-            inc_fwd = self.forward_embs[self.incorrect_indices]    # (M, 1536)
-
-            error_scores    = self._cosine_sim_many(probe_emb, inc_inv)    # (M,)
-            question_scores = self._cosine_sim_many(question_emb, inc_fwd) # (M,)
+            probe_emb = self._embed_text(probe_prediction, client)
+            inc_inv = self.inverted_embs[self.incorrect_indices]
+            inc_fwd = self.forward_embs[self.incorrect_indices]
+            error_scores    = self._cosine_sim_many(probe_emb, inc_inv)
+            question_scores = self._cosine_sim_many(question_emb, inc_fwd)
             composite = self.alpha * error_scores + (1 - self.alpha) * question_scores
+            top_neg = np.argsort(-composite)[:num_negative]
+            negative_examples = [self.bank[self.incorrect_indices[i]] for i in top_neg]
 
-            top_local_indices = np.argsort(-composite)[:num_negative]
-            negative_examples = [
-                self.bank[self.incorrect_indices[i]] for i in top_local_indices
-            ]
-        else:
-            negative_examples = []
-
-        # --- Positive retrieval via Calculator ID (unchanged from baseline) ---
-        available_pos = self.correct_index.get(calculator_id, [])
-        if available_pos:
-            chosen = np.random.choice(
-                available_pos,
-                size=min(num_positive, len(available_pos)),
-                replace=False
-            ).tolist()
-            positive_examples = [self.bank[i] for i in chosen]
-        else:
-            positive_examples = []
+        # --- Smart positive retrieval ---
+        if self.positive_indices:
+            pos_fwd = self.forward_embs[self.positive_indices]
+            q_scores = self._cosine_sim_many(question_emb, pos_fwd)
+            calc_bonus = np.array([
+                1.0 if str(self.bank[i].get("Calculator ID")) == str(calculator_id) else 0.0
+                for i in self.positive_indices
+            ])
+            pos_composite = self.beta_pos * q_scores + (1 - self.beta_pos) * calc_bonus
+            top_pos = np.argsort(-pos_composite)[:num_positive]
+            positive_examples = [self.bank[self.positive_indices[i]] for i in top_pos]
 
         return positive_examples, negative_examples
 
@@ -703,8 +679,10 @@ class BankLifecycleManager:
     """
     Manages demonstration bank lifecycle across model generations.
 
-    Computes U(d, g) = difficulty(d) × (1 - accuracy(g, calc(d), failure_mode(d)))
-    Archives entries where U < epsilon. Recommends Stage 1 rebuild when FMAS decays.
+    Computes U(d, g) = difficulty(d) × (1 - accuracy(g, calc(d))) for every bank entry
+    and tags each entry with its utility for the current generation. The bank is NEVER
+    automatically destroyed — it persists across model generations as a living record
+    of demonstration utility decay. Archival is an optional, explicit action (--archive).
     """
 
     def __init__(self, bank_dir: str, epsilon: float = 0.05,
@@ -750,20 +728,28 @@ class BankLifecycleManager:
 
     def compute_utility(self, entry: Dict, eval_summary: Dict) -> float:
         """
-        U(d, g) = difficulty(d) × (1 - accuracy(g, calc(d), failure_mode(d)))
+        Polarity-aware utility:
 
-        difficulty(d) = contrastive_sharpness stored in the bank entry.
-                        If missing (correct examples), use 0.5 as neutral difficulty.
-        accuracy(...)  = per-calculator accuracy from evaluation_summary for the
-                         current model generation. Failure-mode breakdown not yet
-                         in eval_summary, so per-calculator is the proxy.
+        Positive entries:   U(d, g) = 1.0 - accuracy(g, calc(d))
+            Useful when the model needs guidance on a calculator it hasn't mastered.
+            When accuracy → 1, the model no longer needs positive demonstrations → U → 0.
+
+        Negative entries:   U(d, g) = contrastive_sharpness(d) × (1 - accuracy(g, calc(d)))
+            Useful when the model makes errors that this example teaches against.
+            When accuracy → 1 or sharpness → 0, utility → 0.
 
         Returns float in [0, 1].
         """
-        difficulty = float(entry.get("contrastive_sharpness", 0.5))
-        calc_name  = entry.get("Calculator Name", "")
-        accuracy   = self._get_calculator_accuracy(calc_name, eval_summary)
-        return difficulty * (1.0 - accuracy)
+        polarity = entry.get("polarity")
+        result = entry.get("Result", "")
+        is_positive = (polarity == "positive") or (polarity is None and result == "Correct")
+        calc_name = entry.get("Calculator Name", "")
+        accuracy  = self._get_calculator_accuracy(calc_name, eval_summary)
+        if is_positive:
+            return 1.0 - accuracy
+        else:
+            difficulty = float(entry.get("contrastive_sharpness", 0.5))
+            return difficulty * (1.0 - accuracy)
 
     def update_generation(
         self,
@@ -892,7 +878,7 @@ if __name__ == "__main__":
 
 ---
 
-## 5. New Shell Scripts
+## 5. Shell Scripts
 
 ### 5.1 `run_lifecycle_pipeline.sh` — full 3-stage orchestration
 
@@ -903,160 +889,62 @@ set -euo pipefail
 #
 # Usage:
 #   First run (build new bank):
-#     ./run_lifecycle_pipeline.sh --model gpt-4o --generation 1
-#   Reuse existing bank:
-#     ./run_lifecycle_pipeline.sh --model gpt-5 --generation 2 --bank-dir outputs/seacr_bank_XYZ
+#     ./run_lifecycle_pipeline.sh --model gpt-5 --generation 1
+#   Reuse existing bank (skip Stage 1):
+#     ./run_lifecycle_pipeline.sh --model gpt-5 --generation 2 \
+#       --bank-dir ../outputs/seacr_bank_XYZ
+#   Multi-model evaluation:
+#     ./run_lifecycle_pipeline.sh --model gpt-5 --generation 1 \
+#       --eval-models "gpt-4o,gpt-5,gpt-3.5-turbo,gpt-4o-mini"
 
-MODEL="gpt-4o"
+MODEL="gpt-5"
 GENERATION=1
-BANK_DIR=""
-EXISTING_RESULTS_DIR="../outputs/medcalc_contrastive_edits_evaluation_20251010_054434"
+BANK_DIR=""                    # empty = build new bank
+REFINED_DIR=""                 # empty = run refinement
+TARGET_SIZE=550
+POSITIVE_RATIO=0.45
+SEACR_ALPHA=0.8
+SEACR_BETA_POS=0.6
+ARCHIVE_FLAG="--no-archive"   # default: tag utilities, never remove entries
+EVAL_MODELS=""                 # empty = use MODEL; set for multi-model
 
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --model)        MODEL="$2";       shift 2 ;;
-    --generation)   GENERATION="$2";  shift 2 ;;
-    --bank-dir)     BANK_DIR="$2";    shift 2 ;;
-    --results-dir)  EXISTING_RESULTS_DIR="$2"; shift 2 ;;
-    *) echo "Unknown option: $1" >&2; exit 1 ;;
-  esac
-done
+# Stage 1: Bank built ONCE with gpt-4o, reused across generations
+# Stage 2: SEACR evaluation loops over EVAL_MODELS (or MODEL if not set)
+# Stage 3: Lifecycle tagging per model (archival optional via --archive)
 
-cd /Users/harivallabharangarajan/Desktop/CMU/PromptResearch/medcalc-evaluation
-source ../mohs-llm-as-a-judge/llm-judge-env/bin/activate
-[[ -z "${OPENAI_API_KEY:-}" ]] && { echo "OPENAI_API_KEY not set" >&2; exit 1; }
-
-echo "🔬 Lifecycle-Aware Contrastive Few-Shot Pipeline"
-echo "================================================"
-echo "Model: $MODEL  |  Generation: $GENERATION"
-
-# Stage 1: Build submodular bank (skip if bank already provided)
-if [[ -z "$BANK_DIR" ]]; then
-  echo ""
-  echo "🏗  Stage 1: Submodular Bank Construction"
-  python pipeline/submodular_bank_construction.py \
-    --existing-bank-dir "$EXISTING_RESULTS_DIR" \
-    --train-csv MedCalc-Bench/dataset/train_data.csv \
-    --target-size 170 \
-    --labeling-model gpt-4o
-  BANK_DIR=$(ls -td ../outputs/seacr_bank_* | head -n 1)
-  echo "   ✓ Bank: $BANK_DIR"
-else
-  echo ""
-  echo "🏗  Stage 1: Reusing bank at $BANK_DIR"
-fi
-
-# Prompt refinement (unchanged from existing pipeline)
-echo ""
-echo "📝 Part 2: Prompt Refinement (gpt-5 refiner)"
-python pipeline/prompt_refinement_pipeline.py \
-  --results-dir "$EXISTING_RESULTS_DIR" \
-  --batch-size 5 \
-  --max-iterations 34 \
-  --model gpt-5
-REFINED_DIR=$(ls -td ../outputs/refined_prompts_* | head -n 1)
-
-# Stage 2: SEACR evaluation
-echo ""
-echo "🔍 Stage 2: SEACR Evaluation on 1047 test examples"
-python pipeline/evaluate_contrastive_fewshot_method.py \
-  --refined-prompts-dir "$REFINED_DIR" \
-  --training-results-dir "$EXISTING_RESULTS_DIR" \
-  --num-test-examples 1047 \
-  --num-positive 1 \
-  --num-negative 1 \
-  --batch-size 15 \
-  --save-frequency 50 \
-  --model "$MODEL" \
-  --seacr-bank-dir "$BANK_DIR" \
-  --seacr-alpha 0.8
-EVAL_DIR=$(ls -td ../outputs/contrastive_evaluation_* | head -n 1)
-
-python pipeline/visualize_results.py --evaluation-dir "$EVAL_DIR"
-
-# Stage 3: Lifecycle update
-echo ""
-echo "🗂  Stage 3: Lifecycle Update"
-REBUILD=$(python pipeline/bank_lifecycle_manager.py \
-  --bank-dir "$BANK_DIR" \
-  --eval-summary "$EVAL_DIR/evaluations/evaluation_summary.json" \
-  --model-name "$MODEL" \
-  --generation "$GENERATION" \
-  --epsilon 0.05 \
-  --fmas-threshold 0.15 \
-  --print-rebuild-flag)
-
-echo ""
-if [[ "$REBUILD" == "REBUILD" ]]; then
-  echo "⚠️  Bank rebuild recommended for next generation."
-  echo "   Omit --bank-dir on next run to trigger Stage 1."
-else
-  echo "✅ Bank healthy. Pass --bank-dir $BANK_DIR to next run."
-fi
-
-echo ""
-echo "📁 Bank:    $BANK_DIR"
-echo "📁 Results: $EVAL_DIR"
+# Prompt refinement: 5 iterations × batch 10 = 50 examples (gpt-5 refiner)
 ```
+
+**Key design choices**:
+- Stage 1 always uses `--inference-model gpt-4o` (bank built from previous model)
+- Stage 1 passes `--target-size 550 --positive-ratio 0.45` for contrastive bank
+- Prompt refinement uses `--batch-size 10 --max-iterations 5`
+- Stage 2 + Stage 3 loop over each model in `EVAL_MODELS`
+- Archival is off by default (`--no-archive`); pass `--archive` to enable
 
 ### 5.2 `run_ablation_study.sh` — 5-condition ablation table
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-# Runs the 5-condition ablation table from the paper.
-# Requires: existing bank dir (--bank-dir) and refined prompts dir (--refined-dir)
+# Ablation Study: 5-condition comparison table
 #
-# Usage: ./run_ablation_study.sh --model gpt-4o --bank-dir outputs/seacr_bank_XYZ \
-#                                --refined-dir outputs/refined_prompts_XYZ
+# Conditions:
+#   1. Baseline (random bank, Calculator ID retrieval, no SEACR)
+#   2. +Submodular bank only (alpha=0.0 = question-matching, no error-anchoring)
+#   3. +SEACR on original/existing bank (alpha=0.8, no submodular selection)
+#   4. +Stage 1 + Stage 2 (submodular bank + SEACR retrieval)
+#   5. Full system (lifecycle-pruned bank + SEACR)
+#
+# Multi-model support:
+#   ./run_ablation_study.sh --model gpt-5 \
+#     --eval-models "gpt-4o,gpt-5,gpt-3.5-turbo,gpt-4o-mini" \
+#     --bank-dir ../outputs/seacr_bank_XYZ \
+#     --refined-dir ../outputs/refined_prompts_XYZ
 
-MODEL="gpt-4o"
-BANK_DIR=""
-REFINED_DIR=""
-EXISTING_RESULTS_DIR="../outputs/medcalc_contrastive_edits_evaluation_20251010_054434"
-
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --model)       MODEL="$2";       shift 2 ;;
-    --bank-dir)    BANK_DIR="$2";    shift 2 ;;
-    --refined-dir) REFINED_DIR="$2"; shift 2 ;;
-    *) echo "Unknown: $1" >&2; exit 1 ;;
-  esac
-done
-
-cd /Users/harivallabharangarajan/Desktop/CMU/PromptResearch/medcalc-evaluation
-source ../mohs-llm-as-a-judge/llm-judge-env/bin/activate
-
-COMMON="--training-results-dir $EXISTING_RESULTS_DIR --num-test-examples 1047 \
-        --num-positive 1 --num-negative 1 --batch-size 15 --save-frequency 50 \
-        --model $MODEL --refined-prompts-dir $REFINED_DIR"
-
-# Condition 1: Baseline (random 170, Calculator ID retrieval, no SEACR bank)
-echo "🔬 Condition 1: Baseline"
-python pipeline/evaluate_contrastive_fewshot_method.py $COMMON
-
-# Condition 2: +Stage 1 only (submodular bank, but question-matching retrieval, no error-anchoring)
-echo "🔬 Condition 2: +Submodular Bank only (alpha=0.0 = question-matching, no error-anchoring)"
-python pipeline/evaluate_contrastive_fewshot_method.py $COMMON \
-  --seacr-bank-dir "$BANK_DIR" --seacr-alpha 0.0
-
-# Condition 3: +Stage 2 only (SEACR on original unoptimized bank)
-echo "🔬 Condition 3: +SEACR only (original random bank, alpha=0.8)"
-python pipeline/evaluate_contrastive_fewshot_method.py $COMMON \
-  --seacr-bank-dir "$EXISTING_RESULTS_DIR" --seacr-alpha 0.8
-
-# Condition 4: Full Stage 1 + Stage 2 (submodular bank + SEACR, no lifecycle yet)
-echo "🔬 Condition 4: +Stage 1 + Stage 2 (submodular bank + SEACR)"
-python pipeline/evaluate_contrastive_fewshot_method.py $COMMON \
-  --seacr-bank-dir "$BANK_DIR" --seacr-alpha 0.8
-
-# Condition 5: Full system (all three stages — lifecycle applied offline before this run)
-echo "🔬 Condition 5: Full SEACR-Lifecycle (lifecycle-pruned bank + SEACR)"
-# (same as Condition 4 but bank.jsonl has already been pruned by bank_lifecycle_manager.py)
-python pipeline/evaluate_contrastive_fewshot_method.py $COMMON \
-  --seacr-bank-dir "$BANK_DIR" --seacr-alpha 0.8
-
-echo "✅ Ablation complete. Compare evaluation_summary.json files in each output dir."
+# Wraps all 5 conditions in an outer model loop when --eval-models is set.
+# Per-model ablation summary table with accuracy delta from baseline.
+# Passes --seacr-beta-pos to smart positive retrieval.
 ```
 
 ---
@@ -1114,8 +1002,8 @@ outputs/
 | Full pipeline orchestration | `run_lifecycle_pipeline.sh` | **New file** |
 | Ablation runner | `run_ablation_study.sh` | **New file** |
 
-**Files NOT touched**: `prompt_refinement_pipeline.py`, `contrastive_demonstration_generation.py`,
-`visualize_results.py`, `custom_llm_judge.py`, both existing `.sh` scripts.
+**Files also modified**: `prompt_refinement_pipeline.py` (batch_size 10, max_iterations 5).
+**Files NOT touched**: `contrastive_demonstration_generation.py`, `visualize_results.py`, `custom_llm_judge.py`.
 
 ---
 
@@ -1124,55 +1012,59 @@ outputs/
 ```
 train_data.csv (10k rows)
        │
-       ▼  [Stage 1 — once per model generation, ~30 min for embedding + greedy]
+       ▼  [Stage 1 — runs ONCE with gpt-4o, reused across generations]
 submodular_bank_construction.py
-  1. Load existing 145 incorrect + 365 correct examples from medcalc_contrastive_edits_*/
-  2. LLM labeling pass: gpt-4o assigns failure_mode to each incorrect example (async, batched)
-  3. Compute contrastive_sharpness for each incorrect entry (bulk embedding)
-  4. Embed all questions in bulk → candidate_forward_embs
-  5. Embed all wrong answers in bulk → candidate_inverted_embs
-  6. Greedy submodular loop: select K=170 incorrect examples maximizing Utility(S)
-  7. Build bank.jsonl (selected incorrect + all correct examples)
-  8. Save embeddings.npz (question embeddings) and inverted_index.npz (wrong-answer embeddings)
-  9. Probe model on 20 train examples → compute FMAS baseline → save to bank_metadata.json
+  1. Load existing correct + incorrect examples from medcalc_contrastive_edits_*/
+  2. Generate probe failures on wider train pool (seeds incorrect candidates)
+  3. LLM labeling pass: gpt-4o assigns failure_mode to each incorrect example
+  4. Compute contrastive_sharpness for each incorrect entry (bulk embedding)
+  5. Embed all questions and answers in bulk
+  6. Greedy submodular selection — negatives (target: 302 = 550 × 0.55)
+  7. Greedy submodular selection — positives (target: 248 = 550 × 0.45)
+  8. Build bank.jsonl (stamp polarity field: "positive" or "negative")
+  9. Save embeddings.npz + inverted_index.npz
+  10. Compute FMAS baseline → save to bank_metadata.json
        │
        ▼
 seacr_bank_{timestamp}/
-  bank.jsonl  ·  embeddings.npz  ·  inverted_index.npz  ·  bank_metadata.json
+  bank.jsonl (550 entries: 248 positive + 302 negative, with polarity field)
+  embeddings.npz  ·  inverted_index.npz  ·  bank_metadata.json
        │
-       │  [Stage 2 — per evaluation run]
+       │  [Stage 2 — per evaluation run, per model]
        ▼
 evaluate_contrastive_fewshot_method.py (modified)
   For each of 1047 test examples (async, batch_size=15):
-    1. probe_prediction = model(patient_note, question, one_shot_only)   ← NEW probe call
-    2. score(d_i) = 0.8 · sim(embed(probe), inverted_index[i])           ← NEW inverted search
-                 + 0.2 · sim(embed(question), forward_index[i])
-    3. Retrieve top-1 incorrect by score + top-1 correct by calculator_id
+    1. probe_prediction = model(patient_note, question, one_shot_only)
+    2. Negative retrieval (error-anchored):
+       score(d_i) = 0.8 · sim(embed(probe), inverted_index[i])
+                  + 0.2 · sim(embed(question), forward_index[i])
+       → top-1 from polarity=="negative" entries
+    3. Positive retrieval (smart embedding-based):
+       score(d_i) = 0.6 · sim(embed(question), forward_index[i])
+                  + 0.4 · calculator_match(calculator_id, d_i)
+       → top-1 from polarity=="positive" entries
     4. final_answer = model(patient_note, question, contrastive_pair)
   After all examples:
-    5. FMAS = mean over probes of max sim to nearest wrong-answer in bank  ← NEW metric
+    5. FMAS = mean over probes of max sim to nearest wrong-answer in bank
     6. Save fmas_report.json + add "fmas" to evaluation_summary.json
        │
        ▼
 evaluation_summary.json  ·  fmas_report.json
        │
-       │  [Stage 3 — after each generation's evaluation]
+       │  [Stage 3 — after each model's evaluation, archival optional]
        ▼
 bank_lifecycle_manager.py
   For each bank entry d:
-    U(d, g) = contrastive_sharpness(d) × (1 - per_calculator_accuracy(g, d.Calculator_Name))
-    if U < 0.05 → archive to archived/archived_gen{N}_{model}.jsonl
-  Rewrite bank.jsonl with active entries
-  if FMAS < 0.15 OR active_count < 30% original → print REBUILD recommendation
-  → Next generation: re-run Stage 1 with fresh failures from updated model
+    Positive: U(d, g) = 1.0 - accuracy(g, calc(d))
+    Negative: U(d, g) = contrastive_sharpness(d) × (1 - accuracy(g, calc(d)))
+  Tag U(d,g) in-place per generation (default --no-archive)
+  If --archive: entries with U < 0.05 → archived/archived_gen{N}_{model}.jsonl
+  if FMAS < 0.15 OR active_count < 30% original → print coverage warning
 ```
 
 ---
 
-## 9. First Experiment: Validating SEACR (Minimal Run, Existing Data)
-
-This experiment requires NO new data collection. Uses existing infrastructure to validate the
-core SEACR claim using only what is already on disk.
+## 9. First Experiment: Validating SEACR (Full Pipeline)
 
 ```bash
 # 0. Environment
@@ -1180,60 +1072,51 @@ cd /Users/harivallabharangarajan/Desktop/CMU/PromptResearch/medcalc-evaluation
 source ../mohs-llm-as-a-judge/llm-judge-env/bin/activate
 export OPENAI_API_KEY="sk-proj-..."
 
-# 1. Stage 1: Build submodular bank from the existing 510 examples
-#    (the existing 170 train examples × 3 variants already have LLM Answer + Result)
-#    This only needs the existing bank as input — no new API calls for generation
+# 1. Stage 1: Build contrastive bank (550 entries: 248 positive + 302 negative)
+#    Bank is built ONCE with gpt-4o and reused across all model generations
 python pipeline/submodular_bank_construction.py \
-  --existing-bank-dir ../outputs/medcalc_contrastive_edits_evaluation_20251010_054434 \
+  --existing-bank-dir ../outputs/medcalc_contrastive_edits_evaluation_20260218_234824 \
   --train-csv MedCalc-Bench/dataset/train_data.csv \
-  --target-size 170 \
-  --labeling-model gpt-4o
+  --target-size 550 \
+  --positive-ratio 0.45 \
+  --probe-size 60 \
+  --labeling-model gpt-4o \
+  --inference-model gpt-4o
 BANK_DIR=$(ls -td ../outputs/seacr_bank_* | head -n 1)
-echo "Bank: $BANK_DIR"
 
-# 2. Stage 2 (SEACR) vs Baseline — side-by-side comparison on existing refined prompt
-EXISTING_REFINED="../outputs/refined_prompts_20251010_132955"
+# 2. Prompt refinement (5 iterations × batch 10 = 50 examples, gpt-5 refiner)
+python pipeline/prompt_refinement_pipeline.py \
+  --results-dir ../outputs/medcalc_contrastive_edits_evaluation_20260218_234824 \
+  --batch-size 10 --max-iterations 5 --model gpt-5
+REFINED_DIR=$(ls -td ../outputs/refined_prompts_* | head -n 1)
 
-# Baseline (Calculator ID → random sample, same as existing pipeline)
-python pipeline/evaluate_contrastive_fewshot_method.py \
-  --refined-prompts-dir "$EXISTING_REFINED" \
-  --training-results-dir ../outputs/medcalc_contrastive_edits_evaluation_20251010_054434 \
-  --num-test-examples 1047 --model gpt-4o --batch-size 15
-BASELINE_DIR=$(ls -td ../outputs/contrastive_evaluation_* | head -n 1)
+# 3. Stage 2: SEACR evaluation across all models
+for MODEL in gpt-4o gpt-5 gpt-3.5-turbo gpt-4o-mini; do
+  python pipeline/evaluate_contrastive_fewshot_method.py \
+    --refined-prompts-dir "$REFINED_DIR" \
+    --training-results-dir ../outputs/medcalc_contrastive_edits_evaluation_20260218_234824 \
+    --num-test-examples 1047 --model "$MODEL" --batch-size 15 \
+    --seacr-bank-dir "$BANK_DIR" --seacr-alpha 0.8 --seacr-beta-pos 0.6
+  EVAL_DIR=$(ls -td ../outputs/contrastive_evaluation_* | head -n 1)
 
-# SEACR (error-anchored retrieval)
-python pipeline/evaluate_contrastive_fewshot_method.py \
-  --refined-prompts-dir "$EXISTING_REFINED" \
-  --training-results-dir ../outputs/medcalc_contrastive_edits_evaluation_20251010_054434 \
-  --num-test-examples 1047 --model gpt-4o --batch-size 15 \
-  --seacr-bank-dir "$BANK_DIR" --seacr-alpha 0.8
-SEACR_DIR=$(ls -td ../outputs/contrastive_evaluation_* | head -n 1)
+  # 4. Stage 3: Lifecycle tagging (no archival by default)
+  python pipeline/bank_lifecycle_manager.py \
+    --bank-dir "$BANK_DIR" \
+    --eval-summary "$EVAL_DIR/evaluations/evaluation_summary.json" \
+    --model-name "$MODEL" --generation 1 --no-archive --print-coverage-warning
+done
 
-# 3. Compare results
-echo "--- BASELINE ---"
-python3 -c "import json; d=json.load(open('$BASELINE_DIR/evaluations/evaluation_summary.json')); \
-  print(f'Accuracy: {d[\"contrastive_few_shot\"][\"overall_accuracy\"]:.2%}')"
-
-echo "--- SEACR ---"
-python3 -c "import json; \
-  e=json.load(open('$SEACR_DIR/evaluations/evaluation_summary.json')); \
-  f=json.load(open('$SEACR_DIR/evaluations/fmas_report.json')); \
-  print(f'Accuracy: {e[\"contrastive_few_shot\"][\"overall_accuracy\"]:.2%}'); \
-  print(f'FMAS: {f[\"fmas\"]:.4f}')"
-
-# 4. Run lifecycle update
-python pipeline/bank_lifecycle_manager.py \
-  --bank-dir "$BANK_DIR" \
-  --eval-summary "$SEACR_DIR/evaluations/evaluation_summary.json" \
-  --model-name gpt-4o \
-  --generation 1
+# Or use the orchestration script:
+./run_lifecycle_pipeline.sh --model gpt-5 --generation 1 \
+  --eval-models "gpt-4o,gpt-5,gpt-3.5-turbo,gpt-4o-mini"
 ```
 
 **Expected outputs**:
-- `$BANK_DIR/bank_metadata.json` contains `failure_mode_distribution` and `fmas_baseline`
-- `$SEACR_DIR/evaluations/fmas_report.json` contains `fmas` score for gpt-4o
-- Accuracy comparison between Baseline and SEACR gives the primary claim: SEACR > random retrieval for gpt-4o
-- Lifecycle report shows which bank entries have decayed utility after gpt-4o evaluation
+- `$BANK_DIR/bank.jsonl` — 550 entries with `polarity` field ("positive" or "negative")
+- `$BANK_DIR/bank_metadata.json` — failure_mode_distribution, fmas_baseline, num_positive/negative_selected
+- Per-model `fmas_report.json` — FMAS score for each model generation
+- Multi-model accuracy comparison: SEACR vs baseline across gpt-4o, gpt-5, gpt-3.5-turbo, gpt-4o-mini
+- Lifecycle tags: U(d,g) per generation for cross-generation utility decay analysis
 
 ---
 
@@ -1246,4 +1129,4 @@ openai>=1.0.0       # already present
 ```
 
 No FAISS or scikit-learn required. All ANN search is exact linear scan using `numpy @ matmul`
-over N=170 entries, which takes <1ms per query on CPU and needs no additional dependencies.
+over N=550 entries, which takes <1ms per query on CPU and needs no additional dependencies.

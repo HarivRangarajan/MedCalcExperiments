@@ -5,21 +5,36 @@
 
 ---
 
+## Core Philosophy: Demonstrations as Living Language
+
+The contrastive demonstration bank is built **once** using a previous model (gpt-4o) and
+**reused across model generations** without rebuilding. The bank contains **both positive
+(correct) and negative (incorrect) examples**, curated via separate submodular objectives.
+FMAS scores are tagged per-generation in Stage 3, enabling cross-generation utility decay
+analysis.
+
+**Key design decisions**:
+- Bank is NOT rebuilt each generation — it persists as a living record
+- Archival is **optional** and off by default (`--no-archive`)
+- Both positive and negative examples are curated (contrastive, not just negative)
+- Bank size = 550 (45% positive / 55% negative)
+- Refinement = 5 iterations × batch 10 (50 examples) — focus shifted to bank quality
+- Evaluate across gpt-4o, gpt-5, gpt-3.5-turbo, gpt-4o-mini
+
+---
+
 ## Why This Matters
 
-Current few-shot contrastive prompting retrieves negative examples by `Calculator ID → random.sample()`.
-This ignores *which mistakes the target model actually makes*. A negative example showing a unit-conversion
-error is useless when the model's real failure mode is arithmetic. The demonstration becomes noise.
+Current few-shot contrastive prompting retrieves examples by `Calculator ID → random.sample()`.
+This ignores *which mistakes the target model actually makes* and provides random positive examples
+without regard to question similarity. SEACR fixes both retrieval paths:
 
 **SEACR (Self-Error-Anchored Contrastive Retrieval)** fixes this by:
 1. **Probing** the model on the test question without demonstrations → unconstrained prediction
-2. **Matching** that probe prediction to the inverted index of wrong answers in the bank
-3. **Showing** the bank entry whose wrong answer most resembles what the model would say
-
-This personalizes the negative demonstration to the specific model's error profile. The lifecycle
-component ensures the bank stays fresh: as the model improves (accuracy → 1), utility of entries
-teaching that mistake → 0, and they are archived. When a new model generation arrives, the bank
-rebuilds from fresh failures.
+2. **Negative retrieval**: Matching probe prediction to inverted index of wrong answers (error-anchored)
+3. **Positive retrieval**: Smart embedding-based selection weighted by question similarity + calculator match
+4. **Showing** the most relevant contrastive pair — a positive example the model can learn from and
+   a negative example that mirrors the specific mistake the model would make
 
 **Motivating numbers (current baselines on MedCalc-Bench, 1047 test examples)**:
 | Run | Model | Accuracy |
@@ -28,32 +43,30 @@ rebuilds from fresh failures.
 | `contrastive_evaluation_20251107_031128` | (unknown) | 68.67% |
 | `contrastive_evaluation_20251205_031352` | gpt-5 | **65.71%** ← primary baseline to beat |
 
-SEACR should improve over the 65.71% gpt-5 baseline by ensuring negative demonstrations
-target the model's actual failure modes rather than random examples.
-
 ---
 
 ## Architecture
 
 ```
-Stage 1: Bank Construction (once per model generation)
+Stage 1: Bank Construction (runs ONCE with gpt-4o, reused across generations)
   pipeline/submodular_bank_construction.py
   → outputs/seacr_bank_{timestamp}/
-      bank.jsonl           (enriched entries: failure_mode, contrastive_sharpness, generation)
+      bank.jsonl           (550 entries: 248 positive + 302 negative, with polarity field)
       embeddings.npz       (forward index: question embeddings, N×1536)
       inverted_index.npz   (inverted index: wrong-answer embeddings, N×1536)
       bank_metadata.json   (coverage stats, FMAS baseline, failure_mode_distribution)
 
-Stage 2: SEACR Retrieval (replaces random.sample at inference)
-  pipeline/seacr_retrieval.py           (new module)
-  pipeline/evaluate_contrastive_fewshot_method.py  (5 targeted changes)
+Stage 2: SEACR Retrieval (replaces random.sample at inference, per model)
+  pipeline/seacr_retrieval.py           (smart positive + error-anchored negative)
+  pipeline/evaluate_contrastive_fewshot_method.py  (probe + SEACR + FMAS)
   → outputs/contrastive_evaluation_{timestamp}/
-      evaluations/fmas_report.json      (NEW: FMAS metric)
-      evaluations/evaluation_summary.json  (+ "fmas" field added)
+      evaluations/fmas_report.json
+      evaluations/evaluation_summary.json  (+ "fmas" field)
 
-Stage 3: Lifecycle Management (after each model generation eval)
+Stage 3: Lifecycle Management (tags utility per generation, archival optional)
   pipeline/bank_lifecycle_manager.py
-  → archives low-utility entries, recommends Stage 1 rebuild when FMAS decays
+  → tags U(d,g) per generation; archives only when --archive is set
+  → polarity-aware utility: positive and negative entries have different formulas
 ```
 
 **Key new metric**: FMAS (Failure Mode Alignment Score)
@@ -76,6 +89,38 @@ FMAS ≈ 0 → bank is stale for this model → trigger rebuild
 | 5 | `evaluate_contrastive_fewshot_method.py` (Changes A-E) | ✅ Done | `f694709` |
 | 6 | `pipeline/bank_lifecycle_manager.py` | ✅ Done | `d048cc7` |
 | 7 | Shell scripts + `compare_baselines.py` | ✅ Done | `fa04d34` |
+| 8 | Positive selection + smart retrieval + polarity + params | ✅ Done | `d1e627f`→`1b70459` |
+| 9 | Spec + progress doc updates | ✅ Done | (this commit) |
+
+### Phase 8 Details (Living Language + Contrastive Bank)
+
+Changes across all pipeline files to implement:
+
+**submodular_bank_construction.py**:
+- target_size 170→550, added positive_ratio (0.45)
+- New `greedy_select_positive()` with objective: 0.45·CalculatorCoverage + 0.35·CategoryCoverage - 0.20·Redundancy
+- `build_indexes()` stamps `polarity` field ("positive" / "negative") on each entry
+
+**seacr_retrieval.py**:
+- Added `beta_pos` param (0.6) for smart positive retrieval
+- Positive: `beta_pos · question_sim + (1-beta_pos) · calculator_match`
+- Backward compat: supports both `polarity` field and `Result` field
+
+**evaluate_contrastive_fewshot_method.py**:
+- Added `--seacr-beta-pos` and `--eval-models` CLI args
+- Multi-model evaluation loop
+
+**prompt_refinement_pipeline.py**:
+- batch_size 5→10, max_iterations 34→5
+
+**bank_lifecycle_manager.py**:
+- Polarity-aware utility: positive U = 1-accuracy, negative U = sharpness×(1-accuracy)
+- Polarity counts in gen_stats
+
+**Shell scripts**:
+- Multi-model outer loop (`--eval-models`)
+- Bank always built with gpt-4o (`--inference-model gpt-4o`)
+- target_size=550, positive_ratio=0.45, seacr_beta_pos=0.6
 
 ---
 
@@ -89,10 +134,7 @@ too accurate on training examples). To handle this, Stage 1 includes `generate_p
 - Collects wrong answers → these seed the incorrect pool
 - Union with any existing incorrect entries → candidate pool for greedy selection
 
-This is spec-faithful: §2.1.2 explicitly says candidates include "new examples generated via
-probe inference on the wider 10k pool."
-
-### Stage 1 Submodular Objective
+### Negative Submodular Objective
 ```
 Utility(S) = 0.35 · FailureModeCoverage(S)   # diverse failure types
            + 0.35 · CalculatorCoverage(S)     # broad calculator coverage
@@ -100,25 +142,38 @@ Utility(S) = 0.35 · FailureModeCoverage(S)   # diverse failure types
            - 0.10 · Redundancy(S)              # penalize near-duplicate questions
 ```
 
-### SEACR Retrieval Formula
+### Positive Submodular Objective
 ```
-score(d_i) = 0.8 · sim(embed(probe_prediction), inverted_index[i])  # error-anchoring
-           + 0.2 · sim(embed(question), forward_index[i])            # question-matching
+PositiveUtility(S) = 0.45 · CalculatorCoverage(S)
+                   + 0.35 · CategoryCoverage(S)
+                   - 0.20 · Redundancy(S)
 ```
 
-### Utility Decay (Stage 3)
+### SEACR Retrieval Formulas
 ```
-U(d, g) = contrastive_sharpness(d) × (1 - accuracy(g, calculator_of_d))
+Negative: score(d_i) = 0.8 · sim(embed(probe), inverted_index[i])   # error-anchoring
+                     + 0.2 · sim(embed(question), forward_index[i])  # question-matching
+
+Positive: score(d_i) = 0.6 · sim(embed(question), forward_index[i]) # question similarity
+                     + 0.4 · calculator_match(calc_id, d_i)          # calculator bonus
 ```
-When a model masters a calculator → accuracy → 1 → U → 0 → entry archived.
+
+### Polarity-Aware Utility Decay (Stage 3)
+```
+Positive: U(d, g) = 1.0 - accuracy(g, calc(d))
+Negative: U(d, g) = contrastive_sharpness(d) × (1 - accuracy(g, calc(d)))
+```
+When a model masters a calculator → accuracy → 1 → U → 0. Archival is optional (`--no-archive` default).
 
 ---
 
 ## Ablation Conditions (run_ablation_study.sh)
 
+Per-model ablation (runs for each model in `--eval-models`):
+
 | Condition | Description | Expected |
 |---|---|---|
-| 1 | Baseline (random bank, Calculator ID retrieval) | 65.71% |
+| 1 | Baseline (random bank, Calculator ID retrieval) | 65.71% (gpt-5) |
 | 2 | +Submodular bank only (alpha=0.0, no error-anchoring) | +? |
 | 3 | +SEACR only (original bank, alpha=0.8) | +? |
 | 4 | +Stage 1 + Stage 2 (submodular bank + SEACR) | +?? |
@@ -128,7 +183,7 @@ When a model masters a calculator → accuracy → 1 → U → 0 → entry archi
 
 ## How to Run
 
-See §9 of the spec for the minimal first experiment. Full command at the end of this doc.
+See §9 of the spec for the full experiment. Summary:
 
 ### Quick validation (Stage 1 only):
 ```bash
@@ -139,19 +194,23 @@ export OPENAI_API_KEY="sk-proj-..."
 python pipeline/submodular_bank_construction.py \
   --existing-bank-dir ../outputs/medcalc_contrastive_edits_evaluation_20260218_234824 \
   --train-csv MedCalc-Bench/dataset/train_data.csv \
-  --target-size 100 \
+  --target-size 550 \
+  --positive-ratio 0.45 \
   --probe-size 60 \
-  --labeling-model gpt-4o
+  --labeling-model gpt-4o \
+  --inference-model gpt-4o
 ```
 
-### Full lifecycle pipeline:
+### Full lifecycle pipeline (multi-model):
 ```bash
-./run_lifecycle_pipeline.sh --model gpt-5 --generation 1
+./run_lifecycle_pipeline.sh --model gpt-5 --generation 1 \
+  --eval-models "gpt-4o,gpt-5,gpt-3.5-turbo,gpt-4o-mini"
 ```
 
-### Ablation study (compare all 5 conditions):
+### Ablation study (multi-model, all 5 conditions):
 ```bash
 ./run_ablation_study.sh --model gpt-5 \
+  --eval-models "gpt-4o,gpt-5,gpt-3.5-turbo,gpt-4o-mini" \
   --bank-dir ../outputs/seacr_bank_XXXXXXXX \
   --refined-dir ../outputs/refined_prompts_20251205_023422
 ```
@@ -170,5 +229,8 @@ python pipeline/compare_baselines.py \
 | Condition | Model | Accuracy | FMAS | Notes |
 |---|---|---|---|---|
 | Baseline (contrastive, random) | gpt-5 | 65.71% | N/A | Dec 2025 run |
+| SEACR (Stage 1+2) | gpt-4o | TBD | TBD | |
 | SEACR (Stage 1+2) | gpt-5 | TBD | TBD | |
+| SEACR (Stage 1+2) | gpt-3.5-turbo | TBD | TBD | |
+| SEACR (Stage 1+2) | gpt-4o-mini | TBD | TBD | |
 | Full lifecycle | gpt-5 | TBD | TBD | |
