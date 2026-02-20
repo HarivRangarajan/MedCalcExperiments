@@ -43,8 +43,8 @@ class PromptRefinementPipeline:
     def __init__(self, 
                  api_key: str,
                  results_dir: str,
-                 batch_size: int = 5,
-                 max_iterations: int = 34,
+                 batch_size: int = 10,
+                 max_iterations: int = 5,
                  output_dir: str = None,
                  model: str = "gpt-5"):
         """
@@ -845,15 +845,15 @@ def main():
     parser.add_argument(
         '--batch-size',
         type=int,
-        default=5,
-        help='Number of examples per refinement batch (default: 5)'
+        default=10,
+        help='Number of examples per refinement batch (default: 10)'
     )
 
     parser.add_argument(
         '--max-iterations',
         type=int,
-        default=34,
-        help='Maximum number of iterations (default: 34 = 170 examples / batch size 5)'
+        default=5,
+        help='Maximum number of iterations (default: 5, processing 50 examples total with batch_size=10)'
     )
     
     parser.add_argument(
