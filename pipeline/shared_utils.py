@@ -10,7 +10,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List
 
 # Add MedCalc evaluation imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "MedCalc-Bench" / "evaluation"))
@@ -140,7 +140,7 @@ def evaluate_answer(answer_value: str,
     """
     if not check_correctness or answer_value == "Not Found":
         return False
-    
+
     try:
         is_correct = check_correctness(
             answer_value,
@@ -154,3 +154,25 @@ def evaluate_answer(answer_value: str,
         # If evaluation fails, mark as incorrect
         return False
 
+
+def embed_texts_batch(texts: List[str], client, batch_size: int = 100):
+    """
+    Batch-embed texts using text-embedding-3-small.
+    Used by SubmodularBankBuilder (Stage 1) and SEACRRetriever (Stage 2).
+
+    Args:
+        texts:      list of strings to embed
+        client:     synchronous OpenAI client instance
+        batch_size: texts per API call (OpenAI max is 2048)
+
+    Returns:
+        np.ndarray of shape (len(texts), 1536), dtype float32
+    """
+    import numpy as np
+    all_embeddings = []
+    for i in range(0, len(texts), batch_size):
+        batch = [t[:8000] for t in texts[i:i + batch_size]]
+        response = client.embeddings.create(model="text-embedding-3-small", input=batch)
+        batch_embs = [r.embedding for r in sorted(response.data, key=lambda x: x.index)]
+        all_embeddings.extend(batch_embs)
+    return np.array(all_embeddings, dtype=np.float32)
