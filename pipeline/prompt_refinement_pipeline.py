@@ -43,9 +43,10 @@ class PromptRefinementPipeline:
     def __init__(self, 
                  api_key: str,
                  results_dir: str,
-                 batch_size: int = 17,
-                 max_iterations: int = None,
-                 output_dir: str = None):
+                 batch_size: int = 5,
+                 max_iterations: int = 34,
+                 output_dir: str = None,
+                 model: str = "gpt-5"):
         """
         Initialize the refinement pipeline.
         
@@ -55,8 +56,10 @@ class PromptRefinementPipeline:
             batch_size: Number of examples per refinement batch
             max_iterations: Maximum number of iterations (None = use all examples)
             output_dir: Output directory for refined prompts
+            model: OpenAI model to use for refinement (default: gpt-5)
         """
         self.api_key = api_key
+        self.model = model
         self.client = OpenAI(api_key=api_key)
         self.async_client = AsyncOpenAI(api_key=api_key)
         self.results_dir = Path(results_dir)
@@ -85,6 +88,7 @@ class PromptRefinementPipeline:
         self.evaluation_history = []
         
         print(f"✅ Refinement pipeline initialized")
+        print(f"   • Model: {self.model}")
         print(f"   • Results dir: {self.results_dir}")
         print(f"   • Output dir: {self.output_dir}")
         print(f"   • Batch size: {self.batch_size}")
@@ -294,7 +298,7 @@ class PromptRefinementPipeline:
                                      correct_batch: List[Dict],
                                      incorrect_batch: List[Dict],
                                      iteration: int) -> str:
-        """Create the instruction for GPT-4o to refine the prompt."""
+        """Create the instruction for the LLM to refine the prompt."""
         
         instruction = f"""You are an expert prompt engineer specializing in medical calculation tasks. Your goal is to refine and improve a prompt based on feedback from its performance.
 
@@ -309,36 +313,32 @@ CORRECT Responses ({len(correct_batch)} examples):
 These responses were CORRECT. Analyze what the prompt did well to produce accurate results.
 """
         
-        for i, ex in enumerate(correct_batch[:5], 1):  # Show first 5 for context
+        for i, ex in enumerate(correct_batch, 1):
             instruction += f"""
 Example {i}:
-- Question: {ex['Question'][:200]}...
+- Calculator: {ex['Calculator Name']}
+- Patient Note: {ex['Patient Note']}
+- Question: {ex['Question']}
 - LLM Answer: {ex['LLM Answer']}
 - Ground Truth: {ex['Ground Truth Answer']}
-- Calculator: {ex['Calculator Name']}
 """
-        
-        if len(correct_batch) > 5:
-            instruction += f"\n(+{len(correct_batch) - 5} more correct examples)\n"
-        
+
         instruction += f"""
 
 INCORRECT Responses ({len(incorrect_batch)} examples):
 These responses were INCORRECT. Analyze what went wrong and how to fix it.
 """
-        
-        for i, ex in enumerate(incorrect_batch[:5], 1):
+
+        for i, ex in enumerate(incorrect_batch, 1):
             instruction += f"""
 Example {i}:
-- Question: {ex['Question'][:200]}...
+- Calculator: {ex['Calculator Name']}
+- Patient Note: {ex['Patient Note']}
+- Question: {ex['Question']}
 - LLM Answer: {ex['LLM Answer']}
 - Ground Truth: {ex['Ground Truth Answer']}
-- Calculator: {ex['Calculator Name']}
-- Explanation: {ex['LLM Explanation'][:150]}...
+- Explanation: {ex['LLM Explanation']}
 """
-        
-        if len(incorrect_batch) > 5:
-            instruction += f"\n(+{len(incorrect_batch) - 5} more incorrect examples)\n"
         
         instruction += """
 
@@ -376,15 +376,21 @@ Provide ONLY the refined prompt text. Do not include explanations or meta-commen
         )
         
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
+            # GPT-5 only supports default temperature (1), other models support 0.7
+            api_params = {
+                "model": self.model,
+                "messages": [
                     {"role": "system", "content": "You are an expert prompt engineer. Provide refined prompts based on performance feedback."},
                     {"role": "user", "content": instruction}
                 ],
-                temperature=0.7,
-                max_tokens=4000
-            )
+                "max_completion_tokens": 4000
+            }
+            
+            # Only add temperature for non-GPT-5 models
+            if "gpt-5" not in self.model.lower():
+                api_params["temperature"] = 0.7
+            
+            response = self.client.chat.completions.create(**api_params)
             
             refined_prompt = response.choices[0].message.content.strip()
             
@@ -544,15 +550,21 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
 """
         
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
+            # GPT-5 only supports default temperature (1), other models support 0.7
+            api_params = {
+                "model": self.model,
+                "messages": [
                     {"role": "system", "content": "You are an expert prompt engineer specializing in synthesizing multiple prompts into a unified, superior version."},
                     {"role": "user", "content": combination_instruction}
                 ],
-                temperature=0.7,
-                max_tokens=4000
-            )
+                "max_completion_tokens": 4000
+            }
+            
+            # Only add temperature for non-GPT-5 models
+            if "gpt-5" not in self.model.lower():
+                api_params["temperature"] = 0.7
+            
+            response = self.client.chat.completions.create(**api_params)
             
             unified_prompt = response.choices[0].message.content.strip()
             
@@ -570,89 +582,218 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
             # Fallback: use the best performing one
             return list(refined_prompts.values())[0]
     
-    def run_complete_refinement(self) -> Dict[str, Any]:
-        """Run the complete refinement pipeline."""
+    def load_all_training_examples(self) -> Tuple[List[Dict], List[Dict]]:
+        """Load ALL correct and incorrect examples from all prompt types (CoT, CoD, etc.)."""
+        all_correct = []
+        all_incorrect = []
         
-        print("="*80)
-        print("ITERATIVE PROMPT REFINEMENT PIPELINE")
-        print("="*80)
-        print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        # Find all prompt types from the results directory
+        correct_dir = self.results_dir / "correct"
+        incorrect_dir = self.results_dir / "incorrect"
         
-        # Load enhanced prompts file to get prompt types
+        if correct_dir.exists():
+            for file in correct_dir.glob("*.jsonl"):
+                with open(file, 'r') as f:
+                    for line in f:
+                        all_correct.append(json.loads(line))
+        
+        if incorrect_dir.exists():
+            for file in incorrect_dir.glob("*.jsonl"):
+                with open(file, 'r') as f:
+                    for line in f:
+                        all_incorrect.append(json.loads(line))
+        
+        print(f"📦 Loaded training examples:")
+        print(f"   • Correct: {len(all_correct)}")
+        print(f"   • Incorrect: {len(all_incorrect)}")
+        print(f"   • Total: {len(all_correct) + len(all_incorrect)}")
+        
+        return all_correct, all_incorrect
+    
+    def load_enhanced_prompts(self) -> Dict[str, str]:
+        """Load the enhanced prompts created by PromptEngineer."""
         prompts_file = self.results_dir / "prompts" / "enhanced_prompts.json"
+        
+        if not prompts_file.exists():
+            raise FileNotFoundError(f"Enhanced prompts file not found: {prompts_file}")
+        
         with open(prompts_file, 'r') as f:
             enhanced_prompts = json.load(f)
         
-        prompt_types = list(enhanced_prompts.keys())
-        print(f"📋 Found {len(prompt_types)} prompt types to refine:")
-        for pt in prompt_types:
-            print(f"   • {pt}")
+        print(f"📄 Loaded enhanced prompts:")
+        for prompt_type in enhanced_prompts.keys():
+            print(f"   • {prompt_type}")
         
-        all_refinement_history = {}
-        final_refined_prompts = {}
+        return enhanced_prompts
+    
+    def create_initial_unified_prompt(self) -> str:
+        """Create initial unified prompt by combining CoT and CoD enhanced prompts."""
+        print(f"🔗 Creating initial unified prompt from existing enhanced prompts...")
         
-        # Refine each prompt type
-        for prompt_type in prompt_types:
-            print(f"\n{'='*80}")
-            print(f"Processing: {prompt_type.upper()}")
-            print(f"{'='*80}")
-            
-            # Load original prompt
-            original_prompt = self.load_original_prompt(prompt_type)
-            print(f"\n📄 Original prompt length: {len(original_prompt)} characters")
-            
-            # Load results
-            correct_examples, incorrect_examples = self.load_results(prompt_type)
-            
-            # Perform iterative refinement
-            refinement_history = self.iterative_refinement(
-                prompt_type,
-                original_prompt,
-                correct_examples,
-                incorrect_examples
-            )
-            
-            all_refinement_history[prompt_type] = refinement_history
-            
-            # Get final refined prompt
-            if refinement_history:
-                final_refined_prompts[prompt_type] = refinement_history[-1]['prompt']
-            else:
-                final_refined_prompts[prompt_type] = original_prompt
+        # Load enhanced prompts
+        enhanced_prompts = self.load_enhanced_prompts()
         
-        # Save all refinement histories
+        # Prepare combination instruction
+        combination_instruction = """You are an expert prompt engineer. You have been given enhanced prompts that were created by PromptEngineer for medical calculation tasks.
+
+Your task is to analyze these prompts and create ONE UNIFIED PROMPT that:
+1. Combines the best practices and effective instructions from all provided prompts
+2. Eliminates redundancy and contradictions
+3. Creates a clear, coherent, and highly effective prompt
+4. Maintains compatibility with few-shot examples (runtime injection)
+5. Ensures JSON output format with "step_by_step_thinking" and "answer" fields
+
+**Enhanced Prompts to Combine:**
+
+"""
+        
+        for prompt_type, prompt_text in enhanced_prompts.items():
+            combination_instruction += f"""
+**{prompt_type.replace('_', ' ').title()} Enhanced Prompt:**
+```
+{prompt_text}
+```
+
+"""
+        
+        combination_instruction += """
+**Your Task:**
+Create a SINGLE unified prompt that synthesizes the strengths of all the above prompts. The unified prompt should:
+- Be clear and concise while capturing key insights from all prompts
+- Work effectively across different types of medical calculations
+- Maintain the ability to inject few-shot examples at runtime
+- Specify the JSON output format clearly
+- Include the best reasoning strategies from all approaches
+
+**Output Format:**
+Provide ONLY the unified prompt text. Do not include explanations or meta-commentary. Just output the final prompt that can be directly used.
+"""
+        
+        try:
+            print(f"   • Combining {len(enhanced_prompts)} enhanced prompts using {self.model}...")
+            
+            # GPT-5 only supports default temperature (1), other models support 0.7
+            api_params = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": "You are an expert prompt engineer specializing in synthesizing multiple prompts into a unified, superior version."},
+                    {"role": "user", "content": combination_instruction}
+                ],
+                "max_completion_tokens": 4000
+            }
+            
+            # Only add temperature for non-GPT-5 models
+            if "gpt-5" not in self.model.lower():
+                api_params["temperature"] = 0.7
+            
+            response = self.client.chat.completions.create(**api_params)
+            
+            unified_prompt = response.choices[0].message.content.strip()
+            
+            # Remove markdown code blocks if present
+            if unified_prompt.startswith("```"):
+                lines = unified_prompt.split('\n')
+                unified_prompt = '\n'.join(lines[1:-1]) if len(lines) > 2 else unified_prompt
+            
+            print(f"   ✓ Initial unified prompt created ({len(unified_prompt)} characters)")
+            
+            return unified_prompt
+            
+        except Exception as e:
+            print(f"   ⚠️  Error combining prompts: {e}")
+            # Fallback: use the first available prompt
+            return list(enhanced_prompts.values())[0]
+    
+    def run_complete_refinement(self) -> Dict[str, Any]:
+        """Run the complete refinement pipeline with unified prompt approach."""
+        
+        print("="*80)
+        print("UNIFIED PROMPT ITERATIVE REFINEMENT PIPELINE")
+        print("="*80)
+        print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Model: {self.model}\n")
+        
+        # Load ALL training examples from all prompt types
+        print("📋 Loading training examples from all sources (CoT, CoD, etc.)...")
+        all_correct, all_incorrect = self.load_all_training_examples()
+        
+        # Start with initial unified prompt
+        print(f"\n📝 Creating initial unified prompt...")
+        current_prompt = self.create_initial_unified_prompt()
+        print(f"   ✓ Initial prompt created ({len(current_prompt)} characters)")
+        
+        # Save initial prompt
+        initial_file = self.output_dir / "iterations" / "unified_iteration_0.json"
+        with open(initial_file, 'w') as f:
+            json.dump({
+                "iteration": 0,
+                "prompt": current_prompt,
+                "description": "Initial unified prompt (baseline)"
+            }, f, indent=2)
+        
+        # Evaluate initial prompt
+        print(f"\n🎯 Evaluating initial prompt...")
+        initial_accuracy = self.evaluate_prompt_on_training_set(current_prompt)
+        self.evaluation_history.append({
+            "iteration": 0,
+            "accuracy": initial_accuracy,
+            "prompt_type": "unified"
+        })
+        
+        # Perform iterative refinement on the unified prompt
+        print(f"\n🔧 Starting iterative refinement of unified prompt")
+        print("="*60)
+        
+        refinement_history = self.iterative_refinement(
+            "unified",
+            current_prompt,
+            all_correct,
+            all_incorrect
+        )
+        
+        # Get final refined prompt
+        if refinement_history:
+            unified_prompt = refinement_history[-1]['prompt']
+            final_accuracy = refinement_history[-1]['accuracy']
+        else:
+            unified_prompt = current_prompt
+            final_accuracy = initial_accuracy
+        
+        # Save refinement history
         history_file = self.output_dir / "refinement_history.json"
         with open(history_file, 'w') as f:
-            json.dump(all_refinement_history, f, indent=2)
+            json.dump({"unified": refinement_history}, f, indent=2)
         print(f"\n💾 Saved refinement history to: {history_file}")
         
-        # Save final refined prompts
-        final_prompts_file = self.output_dir / "final" / "final_refined_prompts.json"
-        with open(final_prompts_file, 'w') as f:
-            json.dump(final_refined_prompts, f, indent=2)
-        print(f"💾 Saved final refined prompts to: {final_prompts_file}")
-        
-        # Combine into unified prompt
-        unified_prompt = self.combine_refined_prompts(final_refined_prompts)
-        
-        # Save unified prompt
+        # Save final unified prompt
         unified_file = self.output_dir / "final" / "unified_prompt.txt"
         with open(unified_file, 'w') as f:
             f.write(unified_prompt)
-        print(f"💾 Saved unified prompt to: {unified_file}")
+        print(f"💾 Saved final unified prompt to: {unified_file}")
+        
+        # Also save as JSON for compatibility
+        final_json = self.output_dir / "final" / "final_refined_prompts.json"
+        with open(final_json, 'w') as f:
+            json.dump({"unified": unified_prompt}, f, indent=2)
         
         # Create summary
         summary = {
             "timestamp": datetime.now().isoformat(),
+            "model": self.model,
             "results_dir": str(self.results_dir),
             "output_dir": str(self.output_dir),
             "batch_size": self.batch_size,
             "max_iterations": self.max_iterations,
-            "prompt_types_processed": prompt_types,
-            "refinement_iterations": {
-                pt: len(history) for pt, history in all_refinement_history.items()
+            "approach": "unified_prompt_refinement",
+            "training_examples": {
+                "correct": len(all_correct),
+                "incorrect": len(all_incorrect),
+                "total": len(all_correct) + len(all_incorrect)
             },
-            "final_prompts_file": str(final_prompts_file),
+            "refinement_iterations": len(refinement_history),
+            "initial_accuracy": initial_accuracy,
+            "final_accuracy": final_accuracy,
+            "accuracy_improvement": final_accuracy - initial_accuracy,
             "unified_prompt_file": str(unified_file)
         }
         
@@ -664,11 +805,13 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
         print("REFINEMENT COMPLETE")
         print(f"{'='*80}")
         print(f"\n📊 Summary:")
-        print(f"   • Prompt types processed: {len(prompt_types)}")
-        for pt in prompt_types:
-            iters = len(all_refinement_history.get(pt, []))
-            print(f"      - {pt}: {iters} iterations")
-        print(f"   • Unified prompt created: {len(unified_prompt)} characters")
+        print(f"   • Model used: {self.model}")
+        print(f"   • Training examples: {len(all_correct) + len(all_incorrect)}")
+        print(f"   • Refinement iterations: {len(refinement_history)}")
+        print(f"   • Initial accuracy: {initial_accuracy:.2%}")
+        print(f"   • Final accuracy: {final_accuracy:.2%}")
+        print(f"   • Improvement: {(final_accuracy - initial_accuracy):+.2%}")
+        print(f"   • Unified prompt: {len(unified_prompt)} characters")
         
         # Generate evaluation progress plot
         self.plot_evaluation_progress()
@@ -676,9 +819,10 @@ Provide ONLY the unified prompt text. Do not include explanations or meta-commen
         print(f"\n📁 All outputs saved to: {self.output_dir}/")
         
         return {
-            "refinement_history": all_refinement_history,
-            "final_refined_prompts": final_refined_prompts,
+            "refinement_history": refinement_history,
             "unified_prompt": unified_prompt,
+            "initial_accuracy": initial_accuracy,
+            "final_accuracy": final_accuracy,
             "summary": summary,
             "output_dir": self.output_dir
         }
@@ -701,15 +845,15 @@ def main():
     parser.add_argument(
         '--batch-size',
         type=int,
-        default=17,
-        help='Number of examples per refinement batch (default: 17)'
+        default=5,
+        help='Number of examples per refinement batch (default: 5)'
     )
-    
+
     parser.add_argument(
         '--max-iterations',
         type=int,
-        default=None,
-        help='Maximum number of iterations (default: None = use all examples)'
+        default=34,
+        help='Maximum number of iterations (default: 34 = 170 examples / batch size 5)'
     )
     
     parser.add_argument(
@@ -717,6 +861,13 @@ def main():
         type=str,
         default=None,
         help='Output directory for refined prompts (default: auto-generated)'
+    )
+    
+    parser.add_argument(
+        '--model',
+        type=str,
+        default='gpt-5',
+        help='OpenAI model to use for refinement (default: gpt-5)'
     )
     
     args = parser.parse_args()
@@ -733,7 +884,8 @@ def main():
         results_dir=args.results_dir,
         batch_size=args.batch_size,
         max_iterations=args.max_iterations,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        model=args.model
     )
     
     results = pipeline.run_complete_refinement()

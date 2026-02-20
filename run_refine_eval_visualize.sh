@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Full refinement → evaluation → visualization pipeline with model selection
+# Full refinement → evaluation → visualization pipeline
+# 
+# Refinement: Uses GPT-5 to refine a unified prompt (not separate CoT/CoD prompts)
+# Evaluation: Uses specified model (gpt-4o or gpt-5) for test set evaluation
+#
 # Usage: ./run_refine_eval_visualize.sh --model gpt-4o
 #        ./run_refine_eval_visualize.sh --model gpt-5
 
@@ -31,14 +35,19 @@ if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   exit 1
 fi
 
-echo "🚀 Running pipeline with model: $MODEL"
+echo "🚀 Running pipeline"
 echo "================================================"
+echo "Refinement model: gpt-5"
+echo "Evaluation model: $MODEL"
+echo ""
 
-# Prompt refinement (always uses gpt-4o, evaluates on 170 training samples iteratively)
+# Prompt refinement (uses gpt-5 by default, unified prompt approach)
+# Evaluates on 170 training samples iteratively
 python pipeline/prompt_refinement_pipeline.py \
   --results-dir /Users/harivallabharangarajan/Desktop/CMU/PromptResearch/outputs/medcalc_contrastive_edits_evaluation_20251010_054434 \
-  --batch-size 17 \
-  --max-iterations 10
+  --batch-size 5 \
+  --max-iterations 34 \
+  --model gpt-5
 
 REFINED_DIR=$(ls -td outputs/refined_prompts_* | head -n 1)
 

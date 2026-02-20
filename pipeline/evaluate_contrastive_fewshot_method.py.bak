@@ -597,18 +597,18 @@ class ContrastiveFewShotEvaluator:
             print("\n📄 Loading unified prompt...")
             unified_prompt = self.load_unified_prompt()
             
-            print("\n" + "="*80)
-            print("EVALUATING: Contrastive Few-Shot Prompt (Refined)")
-            print("="*80)
-            contrastive_results = self.generate_and_evaluate(df, "contrastive_few_shot", unified_prompt)
-            contrastive_eval = self.evaluate_results(contrastive_results, "contrastive_few_shot")
-            
-            print(f"\n📊 Contrastive Few-Shot Results:")
-            print(f"   • Overall Accuracy: {contrastive_eval['overall_accuracy']:.2%}")
-            print(f"   • Correct: {contrastive_eval['correct']}/{contrastive_eval['total']}")
-            
+        print("\n" + "="*80)
+        print("EVALUATING: Contrastive Few-Shot Prompt (Refined)")
+        print("="*80)
+        contrastive_results = self.generate_and_evaluate(df, "contrastive_few_shot", unified_prompt)
+        contrastive_eval = self.evaluate_results(contrastive_results, "contrastive_few_shot")
+        
+        print(f"\n📊 Contrastive Few-Shot Results:")
+        print(f"   • Overall Accuracy: {contrastive_eval['overall_accuracy']:.2%}")
+        print(f"   • Correct: {contrastive_eval['correct']}/{contrastive_eval['total']}")
+        
             # Calculate improvement
-            improvement = contrastive_eval['overall_accuracy'] - baseline_eval['overall_accuracy']
+        improvement = contrastive_eval['overall_accuracy'] - baseline_eval['overall_accuracy']
             print(f"\n📈 Improvement over baseline: {improvement:+.2%}")
         
         # Save evaluations
@@ -774,7 +774,7 @@ def main():
     print(f"\n✅ Evaluation completed successfully!")
     print(f"📁 Outputs: {results['output_dir']}")
     if results['improvement'] is not None:
-        print(f"📈 Final improvement: {results['improvement']:+.2%}")
+    print(f"📈 Final improvement: {results['improvement']:+.2%}")
 
 
 if __name__ == "__main__":
