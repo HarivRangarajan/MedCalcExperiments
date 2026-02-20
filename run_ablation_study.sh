@@ -23,14 +23,18 @@ BANK_DIR=""
 REFINED_DIR=""
 EXISTING_RESULTS_DIR="../outputs/medcalc_contrastive_edits_evaluation_20260218_234824"
 NUM_EXAMPLES=1047
+EVAL_MODELS=""    # empty = use MODEL only; set to "gpt-4o,gpt-5,gpt-3.5-turbo,gpt-4o-mini" for multi-model
+SEACR_BETA_POS=0.6
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --model)        MODEL="$2";                shift 2 ;;
-    --bank-dir)     BANK_DIR="$2";             shift 2 ;;
-    --refined-dir)  REFINED_DIR="$2";          shift 2 ;;
-    --results-dir)  EXISTING_RESULTS_DIR="$2"; shift 2 ;;
-    --num-examples) NUM_EXAMPLES="$2";         shift 2 ;;
+    --model)          MODEL="$2";                shift 2 ;;
+    --bank-dir)       BANK_DIR="$2";             shift 2 ;;
+    --refined-dir)    REFINED_DIR="$2";          shift 2 ;;
+    --results-dir)    EXISTING_RESULTS_DIR="$2"; shift 2 ;;
+    --num-examples)   NUM_EXAMPLES="$2";         shift 2 ;;
+    --eval-models)    EVAL_MODELS="$2";          shift 2 ;;
+    --seacr-beta-pos) SEACR_BETA_POS="$2";      shift 2 ;;
     *) echo "Unknown: $1" >&2; exit 1 ;;
   esac
 done
@@ -43,22 +47,37 @@ VENV="../mohs-llm-as-a-judge/llm-judge-env/bin/activate"
 if [[ -f "$VENV" ]]; then source "$VENV"; fi
 [[ -z "${OPENAI_API_KEY:-}" ]] && { echo "❌ OPENAI_API_KEY not set" >&2; exit 1; }
 
+# Determine model list
+if [[ -n "$EVAL_MODELS" ]]; then
+  IFS=',' read -ra MODEL_LIST <<< "$EVAL_MODELS"
+else
+  MODEL_LIST=("$MODEL")
+fi
+
+ABLATION_LOG="../outputs/ablation_results_$(date +%Y%m%d_%H%M%S).txt"
+echo "Ablation Study — Models: ${MODEL_LIST[*]} — $(date)" | tee "$ABLATION_LOG"
+echo "============================================================" | tee -a "$ABLATION_LOG"
+
+for ABLATION_MODEL in "${MODEL_LIST[@]}"; do
+
+echo "" | tee -a "$ABLATION_LOG"
+echo "============================================================" | tee -a "$ABLATION_LOG"
+echo "  MODEL: $ABLATION_MODEL" | tee -a "$ABLATION_LOG"
+echo "============================================================" | tee -a "$ABLATION_LOG"
+
 COMMON="--training-results-dir $EXISTING_RESULTS_DIR \
         --num-test-examples $NUM_EXAMPLES \
         --num-positive 1 --num-negative 1 \
         --batch-size 15 --save-frequency 50 \
-        --model $MODEL \
+        --model $ABLATION_MODEL \
+        --seacr-beta-pos $SEACR_BETA_POS \
         --refined-prompts-dir $REFINED_DIR"
-
-ABLATION_LOG="../outputs/ablation_results_$(date +%Y%m%d_%H%M%S).txt"
-echo "Ablation Study — Model: $MODEL — $(date)" | tee "$ABLATION_LOG"
-echo "============================================================" | tee -a "$ABLATION_LOG"
 
 # ---------------------------------------------------------------------------
 # Condition 1: Baseline
 # ---------------------------------------------------------------------------
 echo "" | tee -a "$ABLATION_LOG"
-echo "🔬 Condition 1: Baseline (random bank, Calculator ID retrieval)" | tee -a "$ABLATION_LOG"
+echo "🔬 C1: Baseline (random bank, Calculator ID retrieval) — $ABLATION_MODEL" | tee -a "$ABLATION_LOG"
 python pipeline/evaluate_contrastive_fewshot_method.py $COMMON
 C1_DIR=$(ls -td ../outputs/contrastive_evaluation_* | head -n 1)
 python3 -c "
@@ -72,7 +91,7 @@ print(f'  Accuracy: {acc:.4f}' if isinstance(acc,float) else f'  Accuracy: {acc}
 # Condition 2: +Submodular bank only (alpha=0.0 = question-matching)
 # ---------------------------------------------------------------------------
 echo "" | tee -a "$ABLATION_LOG"
-echo "🔬 Condition 2: +Submodular Bank (alpha=0.0, no error-anchoring)" | tee -a "$ABLATION_LOG"
+echo "🔬 C2: +Submodular Bank (alpha=0.0, no error-anchoring) — $ABLATION_MODEL" | tee -a "$ABLATION_LOG"
 python pipeline/evaluate_contrastive_fewshot_method.py $COMMON \
   --seacr-bank-dir "$BANK_DIR" --seacr-alpha 0.0
 C2_DIR=$(ls -td ../outputs/contrastive_evaluation_* | head -n 1)
@@ -84,25 +103,18 @@ print(f'  Accuracy: {acc:.4f}' if isinstance(acc,float) else f'  Accuracy: {acc}
 " | tee -a "$ABLATION_LOG"
 
 # ---------------------------------------------------------------------------
-# Condition 3: +SEACR on original bank (not submodular, alpha=0.8)
+# Condition 3: +SEACR on original bank (alpha=0.8)
 # ---------------------------------------------------------------------------
 echo "" | tee -a "$ABLATION_LOG"
-echo "🔬 Condition 3: +SEACR only (original bank, alpha=0.8)" | tee -a "$ABLATION_LOG"
-# Note: for this condition, we need a bank built from the original random bank.
-# Use the same BANK_DIR but with alpha=0.8 — this tests SEACR without
-# submodular selection (if bank was built from existing random examples).
+echo "🔬 C3: +SEACR only (original bank, alpha=0.8) — $ABLATION_MODEL" | tee -a "$ABLATION_LOG"
 python pipeline/evaluate_contrastive_fewshot_method.py $COMMON \
   --seacr-bank-dir "$BANK_DIR" --seacr-alpha 0.8
 C3_DIR=$(ls -td ../outputs/contrastive_evaluation_* | head -n 1)
 python3 -c "
-import json
+import json, os
 d=json.load(open('$C3_DIR/evaluations/evaluation_summary.json'))
 acc=d.get('contrastive_few_shot',{}).get('overall_accuracy','N/A')
-f_file='$C3_DIR/evaluations/fmas_report.json'
-import os
-fmas='N/A'
-if os.path.exists(f_file):
-    fmas=round(json.load(open(f_file)).get('fmas',0),4)
+fmas=d.get('fmas','N/A')
 print(f'  Accuracy: {acc:.4f}  FMAS: {fmas}' if isinstance(acc,float) else f'  Accuracy: {acc}')
 " | tee -a "$ABLATION_LOG"
 
@@ -110,7 +122,7 @@ print(f'  Accuracy: {acc:.4f}  FMAS: {fmas}' if isinstance(acc,float) else f'  A
 # Condition 4: Full Stage 1 + Stage 2
 # ---------------------------------------------------------------------------
 echo "" | tee -a "$ABLATION_LOG"
-echo "🔬 Condition 4: +Stage 1 + Stage 2 (submodular bank + SEACR, alpha=0.8)" | tee -a "$ABLATION_LOG"
+echo "🔬 C4: +Stage 1 + Stage 2 (submodular bank + SEACR, alpha=0.8) — $ABLATION_MODEL" | tee -a "$ABLATION_LOG"
 python pipeline/evaluate_contrastive_fewshot_method.py $COMMON \
   --seacr-bank-dir "$BANK_DIR" --seacr-alpha 0.8
 C4_DIR=$(ls -td ../outputs/contrastive_evaluation_* | head -n 1)
@@ -123,20 +135,18 @@ print(f'  Accuracy: {acc:.4f}  FMAS: {fmas}' if isinstance(acc,float) else f'  A
 " | tee -a "$ABLATION_LOG"
 
 # ---------------------------------------------------------------------------
-# Condition 5: Full system (with lifecycle-pruned bank — same run as 4
-#   unless bank was already pruned by lifecycle manager)
+# Condition 5: Full system (lifecycle is offline step)
 # ---------------------------------------------------------------------------
 echo "" | tee -a "$ABLATION_LOG"
-echo "🔬 Condition 5: Full SEACR-Lifecycle (same bank as C4 — lifecycle is offline step)" | tee -a "$ABLATION_LOG"
-echo "   (To test post-lifecycle bank, run bank_lifecycle_manager.py then re-run Condition 4)" | tee -a "$ABLATION_LOG"
+echo "🔬 C5: Full SEACR-Lifecycle (same bank as C4 — lifecycle is offline) — $ABLATION_MODEL" | tee -a "$ABLATION_LOG"
+echo "   (To test post-lifecycle bank, run bank_lifecycle_manager.py then re-run C4)" | tee -a "$ABLATION_LOG"
 
 # ---------------------------------------------------------------------------
-# Summary
+# Per-model summary
 # ---------------------------------------------------------------------------
 echo "" | tee -a "$ABLATION_LOG"
-echo "============================================================" | tee -a "$ABLATION_LOG"
-echo "📊 ABLATION SUMMARY" | tee -a "$ABLATION_LOG"
-echo "============================================================" | tee -a "$ABLATION_LOG"
+echo "📊 $ABLATION_MODEL ABLATION SUMMARY" | tee -a "$ABLATION_LOG"
+echo "------------------------------------------------------------" | tee -a "$ABLATION_LOG"
 python3 - <<PYEOF | tee -a "$ABLATION_LOG"
 import json, os
 
@@ -165,6 +175,8 @@ for label, d in dirs:
     fmas_str = f"  FMAS={fmas:.4f}" if fmas is not None else ""
     print(f"  {label:45s}  acc={acc:.4f}  Δ={delta:+.4f}{fmas_str}")
 PYEOF
+
+done  # end model loop
 
 echo ""
 echo "✅ Ablation complete. Full log: $ABLATION_LOG"
